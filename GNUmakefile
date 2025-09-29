@@ -21,4 +21,24 @@ test:
 testacc:
 	TF_ACC=1 go test -v -cover -timeout 120m ./...
 
-.PHONY: fmt lint test testacc build install generate
+testcontainer:
+	podman build -t terraform-provider-ldap:latest test/
+
+testcontainer-run: testcontainer .test-container-id
+
+.test-container-id:
+	@echo "Starting test container..."
+	podman run -d --rm -p 3389:1389 terraform-provider-ldap:latest > $@
+	@echo "Container ID: $$(cat $@)"
+	@echo "Waiting for container to be ready..."
+	@sleep 5
+
+clean:
+	@if [ -f .test-container-id ]; then \
+		echo "Stopping test container: $$(cat .test-container-id)"; \
+		podman stop "$$(cat .test-container-id)" 2>/dev/null || true; \
+		rm -f .test-container-id; \
+	fi
+	@echo "Cleaned up test artifacts"
+
+.PHONY: fmt lint test testacc build install generate testcontainer testcontainer-run clean

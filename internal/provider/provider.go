@@ -157,6 +157,7 @@ func (p *LdapProvider) EphemeralResources(ctx context.Context) []func() ephemera
 func (p *LdapProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewExampleDataSource,
+		NewLdapSearchDataSource,
 	}
 }
 
