@@ -45,9 +45,9 @@ func TestAccLdapEntryResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      "ldap_entry.test",
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            "ldap_entry.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"object_class", "attributes"},
 			},
 			// Update and Read testing

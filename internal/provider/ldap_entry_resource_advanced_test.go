@@ -45,10 +45,10 @@ func TestAccLdapEntryResource_InetOrgPerson(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:                     "ldap_entry.inetorg_user",
-				ImportState:                      true,
-				ImportStateVerify:                true,
-				ImportStateVerifyIgnore:          []string{"object_class", "attributes"},
+				ResourceName:                         "ldap_entry.inetorg_user",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIgnore:              []string{"object_class", "attributes"},
 				ImportStateVerifyIdentifierAttribute: "dn",
 			},
 			// Delete testing automatically occurs in TestCase

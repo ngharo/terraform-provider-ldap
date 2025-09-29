@@ -45,30 +45,29 @@ func (r *LdapEntryResource) Metadata(ctx context.Context, req resource.MetadataR
 
 func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "LDAP entry resource",
+		MarkdownDescription: "Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains object classes and attributes.",
 
 		Attributes: map[string]schema.Attribute{
 			"dn": schema.StringAttribute{
-				MarkdownDescription: "The distinguished name of the LDAP entry",
+				MarkdownDescription: "The distinguished name (DN) of the LDAP entry. This uniquely identifies the entry in the LDAP directory tree. Changing this forces a new resource to be created.",
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"object_class": schema.ListAttribute{
-				MarkdownDescription: "List of object classes for the LDAP entry",
+				MarkdownDescription: "List of object classes for the LDAP entry. Object classes define the schema and required attributes for the entry. Common values include `person`, `organizationalPerson`, `inetOrgPerson`, `groupOfNames`, and `organizationalUnit`.",
 				Required:            true,
 				ElementType:         types.StringType,
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "LDAP attributes of the entry",
+				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are attribute values. Required attributes depend on the object classes specified. Note that `objectClass` is automatically managed and should not be included here.",
 				Optional:            true,
 				ElementType:         types.StringType,
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "LDAP entry identifier (same as DN)",
+				MarkdownDescription: "The unique identifier for this resource, which is the same as the DN.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -348,7 +347,7 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 	resource.ImportStatePassthroughID(ctx, path.Root("dn"), req, resp)
 }
 
-// Helper function to compare string slices
+// Helper function to compare string slices.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

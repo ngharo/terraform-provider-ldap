@@ -32,11 +32,11 @@ type LdapProvider struct {
 
 // LdapProviderModel describes the provider data model.
 type LdapProviderModel struct {
-	Host     types.String `tfsdk:"host"`
-	Port     types.Int64  `tfsdk:"port"`
-	BindDN   types.String `tfsdk:"bind_dn"`
-	BindPW   types.String `tfsdk:"bind_password"`
-	UseTLS   types.Bool   `tfsdk:"use_tls"`
+	Host   types.String `tfsdk:"host"`
+	Port   types.Int64  `tfsdk:"port"`
+	BindDN types.String `tfsdk:"bind_dn"`
+	BindPW types.String `tfsdk:"bind_password"`
+	UseTLS types.Bool   `tfsdk:"use_tls"`
 }
 
 func (p *LdapProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -46,26 +46,27 @@ func (p *LdapProvider) Metadata(ctx context.Context, req provider.MetadataReques
 
 func (p *LdapProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: "The LDAP provider is used to interact with LDAP (Lightweight Directory Access Protocol) servers. It allows you to manage LDAP entries using Terraform.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				MarkdownDescription: "LDAP server hostname or IP address",
+				MarkdownDescription: "LDAP server hostname or IP address. Can also be set via the `LDAP_HOST` environment variable. Defaults to `localhost`.",
 				Optional:            true,
 			},
 			"port": schema.Int64Attribute{
-				MarkdownDescription: "LDAP server port (default: 389 for LDAP, 636 for LDAPS)",
+				MarkdownDescription: "LDAP server port. Can also be set via the `LDAP_PORT` environment variable. Defaults to `389` for LDAP or `636` for LDAPS.",
 				Optional:            true,
 			},
 			"bind_dn": schema.StringAttribute{
-				MarkdownDescription: "Distinguished name for binding to LDAP server",
+				MarkdownDescription: "Distinguished name for binding to LDAP server. Can also be set via the `LDAP_BIND_DN` environment variable.",
 				Optional:            true,
 			},
 			"bind_password": schema.StringAttribute{
-				MarkdownDescription: "Password for binding to LDAP server",
+				MarkdownDescription: "Password for binding to LDAP server. Can also be set via the `LDAP_BIND_PASSWORD` environment variable.",
 				Optional:            true,
 				Sensitive:           true,
 			},
 			"use_tls": schema.BoolAttribute{
-				MarkdownDescription: "Use TLS for LDAP connection",
+				MarkdownDescription: "Use TLS for LDAP connection. Can also be set via the `LDAP_USE_TLS` environment variable. Defaults to `false`.",
 				Optional:            true,
 			},
 		},
@@ -109,9 +110,9 @@ func (p *LdapProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	var err error
 
 	if useTLS {
-		conn, err = ldap.DialTLS("tcp", fmt.Sprintf("%s:%d", host, port), nil)
+		conn, err = ldap.DialURL(fmt.Sprintf("ldaps://%s:%d", host, port))
 	} else {
-		conn, err = ldap.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
+		conn, err = ldap.DialURL(fmt.Sprintf("ldap://%s:%d", host, port))
 	}
 
 	if err != nil {

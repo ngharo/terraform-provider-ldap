@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an empty terraform-provider-ldap repository that appears to be in initial setup phase. The repository currently contains only basic Git configuration and this guidance file.
+This project is a Terraform provider that implements basic LDAP CRUD operations. Generally, this
+provider is designed to provide a primitive ldap_entry resource that users can wrap in a module
+to provide more user friendly functionality to meet their needs.
 
 ## Development Setup
 
@@ -22,6 +24,7 @@ When the codebase is developed, it will likely follow standard Terraform provide
 - Acceptance tests in `*_test.go` files
 - Documentation in `docs/` or `website/`
 - Example configurations in `examples/`
+- Test environment using podman in `test/`
 
 ## Build Commands
 
