@@ -20,13 +20,7 @@ func TestAccLdapSearchDataSource_Basic(t *testing.T) {
 			{
 				Config: testAccLdapSearchDataSourceConfig(),
 				ConfigStateChecks: []statecheck.StateCheck{
-					// Verify the base entry is created
-					statecheck.ExpectKnownValue(
-						"ldap_entry.base",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("dc=example,dc=com"),
-					),
-					// Verify the search finds the base entry
+					// Verify the search finds the base entry (base DN exists in container)
 					statecheck.ExpectKnownValue(
 						"data.ldap_search.base_search",
 						tfjsonpath.New("results").AtSliceIndex(0).AtMapKey("dn"),
@@ -47,19 +41,9 @@ provider "ldap" {
   bind_password = "secret"
 }
 
-# Create the base DN
-resource "ldap_entry" "base" {
-  dn = "dc=example,dc=com"
-  object_class = ["top", "dcObject", "organization"]
-  attributes = {
-    o = "Example Organization"
-    dc = "example"
-  }
-}
-
-# Search for the base entry
+# Search for the base entry (base DN already exists in container)
 data "ldap_search" "base_search" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   scope = "base"
   filter = "(objectClass=*)"
 }

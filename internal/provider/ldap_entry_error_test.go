@@ -30,8 +30,9 @@ func TestAccLdapEntryResource_MissingRequiredAttribute(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccLdapEntryResourceConfigMissingRequired(),
-				ExpectError: regexp.MustCompile("object class 'person' requires attribute 'sn'"),
+				Config: testAccLdapEntryResourceConfigMissingRequired(),
+				// output may contain newlines, hence `\s+` for whitespace
+				ExpectError: regexp.MustCompile(`object\s+class\s+'person'\s+requires\s+attribute\s+'sn'`),
 			},
 		},
 	})

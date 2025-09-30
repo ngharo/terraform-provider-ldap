@@ -138,36 +138,9 @@ provider "ldap" {
   bind_password = "secret"
 }
 
-# Create the base DN first
-resource "ldap_entry" "base" {
-  dn = "dc=example,dc=com"
-  object_class = ["top", "dcObject", "organization"]
-  attributes = {
-    o = "Example Organization"
-    dc = "example"
-  }
-}
-
-# Create organizational units - implicit dependency on base
-resource "ldap_entry" "users_ou" {
-  dn = "ou=users,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "users"
-  }
-}
-
-resource "ldap_entry" "groups_ou" {
-  dn = "ou=groups,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "groups"
-  }
-}
-
-# Create a user entry - implicit dependency on users_ou
+# Create a user entry (base DN and OUs already exist in container)
 resource "ldap_entry" "user" {
-  dn = "cn=testuser,${ldap_entry.users_ou.dn}"
+  dn = "cn=testuser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
     cn = "testuser"
@@ -178,9 +151,9 @@ resource "ldap_entry" "user" {
   }
 }
 
-# Create a group entry - implicit dependency on groups_ou and user
+# Create a group entry
 resource "ldap_entry" "group" {
-  dn = "cn=testgroup,${ldap_entry.groups_ou.dn}"
+  dn = "cn=testgroup,ou=groups,dc=example,dc=com"
   object_class = ["top", "groupOfNames"]
   attributes = {
     cn = "testgroup"
@@ -189,23 +162,23 @@ resource "ldap_entry" "group" {
   }
 }
 
-# Search for users - implicit dependency on user
+# Search for users
 data "ldap_search" "users" {
-  basedn = ldap_entry.users_ou.dn
+  basedn = "ou=users,dc=example,dc=com"
   filter = "(objectClass=person)"
   requested_attributes = ["cn", "sn", "givenName", "mail", "description"]
 }
 
-# Search for groups - implicit dependency on group
+# Search for groups
 data "ldap_search" "groups" {
-  basedn = ldap_entry.groups_ou.dn
+  basedn = "ou=groups,dc=example,dc=com"
   filter = "(objectClass=groupOfNames)"
   requested_attributes = ["cn", "description"]
 }
 
-# Search for group members - implicit dependency on group
+# Search for group members
 data "ldap_search" "group_members" {
-  basedn = ldap_entry.groups_ou.dn
+  basedn = "ou=groups,dc=example,dc=com"
   filter = "(member=${ldap_entry.user.dn})"
   requested_attributes = ["cn", "member"]
 }
@@ -221,36 +194,9 @@ provider "ldap" {
   bind_password = "secret"
 }
 
-# Create the base DN first
-resource "ldap_entry" "base" {
-  dn = "dc=example,dc=com"
-  object_class = ["top", "dcObject", "organization"]
-  attributes = {
-    o = "Example Organization"
-    dc = "example"
-  }
-}
-
-# Create organizational units
-resource "ldap_entry" "users_ou" {
-  dn = "ou=users,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "users"
-  }
-}
-
-resource "ldap_entry" "groups_ou" {
-  dn = "ou=groups,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "groups"
-  }
-}
-
-# Create a user to find with subtree search
+# Create a user to find with subtree search (base DN and OUs already exist in container)
 resource "ldap_entry" "user" {
-  dn = "cn=scopeuser,${ldap_entry.users_ou.dn}"
+  dn = "cn=scopeuser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
     cn = "scopeuser"
@@ -261,21 +207,21 @@ resource "ldap_entry" "user" {
 
 # Base scope - search only the base DN
 data "ldap_search" "base_search" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   scope = "base"
   filter = "(objectClass=*)"
 }
 
 # One level scope - search immediate children only
 data "ldap_search" "one_level_search" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   scope = "one"
   filter = "(objectClass=organizationalUnit)"
 }
 
 # Subtree scope - search entire subtree
 data "ldap_search" "subtree_search" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   scope = "sub"
   filter = "(cn=scopeuser)"
 }
@@ -291,36 +237,9 @@ provider "ldap" {
   bind_password = "secret"
 }
 
-# Create the base DN first
-resource "ldap_entry" "base" {
-  dn = "dc=example,dc=com"
-  object_class = ["top", "dcObject", "organization"]
-  attributes = {
-    o = "Example Organization"
-    dc = "example"
-  }
-}
-
-# Create organizational units
-resource "ldap_entry" "users_ou" {
-  dn = "ou=users,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "users"
-  }
-}
-
-resource "ldap_entry" "groups_ou" {
-  dn = "ou=groups,${ldap_entry.base.dn}"
-  object_class = ["top", "organizationalUnit"]
-  attributes = {
-    ou = "groups"
-  }
-}
-
-# Create test entries
+# Create test entries (base DN and OUs already exist in container)
 resource "ldap_entry" "user_with_email" {
-  dn = "cn=filteruser,${ldap_entry.users_ou.dn}"
+  dn = "cn=filteruser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
     cn = "filteruser"
@@ -331,7 +250,7 @@ resource "ldap_entry" "user_with_email" {
 }
 
 resource "ldap_entry" "group" {
-  dn = "cn=filtergroup,${ldap_entry.groups_ou.dn}"
+  dn = "cn=filtergroup,ou=groups,dc=example,dc=com"
   object_class = ["top", "groupOfNames"]
   attributes = {
     cn = "filtergroup"
@@ -342,21 +261,21 @@ resource "ldap_entry" "group" {
 
 # AND filter - users with email addresses
 data "ldap_search" "users_with_email" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   filter = "(&(objectClass=person)(mail=*))"
   requested_attributes = ["cn", "mail"]
 }
 
 # OR filter - users or groups
 data "ldap_search" "users_or_groups" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   filter = "(|(objectClass=person)(objectClass=groupOfNames))"
   requested_attributes = ["cn", "objectClass"]
 }
 
 # NOT filter - entries that are not groups
 data "ldap_search" "not_groups" {
-  basedn = ldap_entry.base.dn
+  basedn = "dc=example,dc=com"
   filter = "(&(objectClass=person)(!(objectClass=groupOfNames)))"
   requested_attributes = ["cn", "objectClass"]
 }

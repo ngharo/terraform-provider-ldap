@@ -1,6 +1,6 @@
 default: fmt lint install generate
 
-build:
+build: clean
 	go build -v ./...
 
 install: build
@@ -18,7 +18,7 @@ fmt:
 test:
 	go test -v -cover -timeout=120s -parallel=10 ./...
 
-testacc:
+testacc: clean testcontainer-run
 	TF_ACC=1 go test -v -cover -timeout 120m ./...
 
 testcontainer:
@@ -39,6 +39,7 @@ clean:
 		podman stop "$$(cat .test-container-id)" 2>/dev/null || true; \
 		rm -f .test-container-id; \
 	fi
-	@echo "Cleaned up test artifacts"
+	rm -f terraform-provider-ldap
+	@echo "Cleaned up build and test artifacts"
 
 .PHONY: fmt lint test testacc build install generate testcontainer testcontainer-run clean

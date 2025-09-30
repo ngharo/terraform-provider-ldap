@@ -1,0 +1,25 @@
+dn: dc=example,dc=com
+objectclass: dcObject
+objectclass: organization
+o: Example Company
+dc: example
+
+dn: cn=Manager,dc=example,dc=com
+objectclass: organizationalRole
+cn: Manager
+
+# Subtree for Users
+dn:                    ou=users,dc=example,dc=com
+ou:                    users
+description:           Users
+objectClass:           organizationalUnit
+objectClass:           top
+structuralObjectClass: organizationalUnit
+
+# Subtree for Groups
+dn:                    ou=groups,dc=example,dc=com
+ou:                    groups
+description:           Groups
+objectClass:           organizationalUnit
+objectClass:           top
+structuralObjectClass: organizationalUnit

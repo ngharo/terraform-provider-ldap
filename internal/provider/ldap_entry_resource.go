@@ -153,7 +153,7 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 
 	// Write logs using the tflog package
 	// Documentation: https://terraform.io/plugin/log
-	tflog.Trace(ctx, "created an LDAP entry")
+	tflog.Trace(ctx, fmt.Sprintf("created an LDAP entry: %s", data.Id))
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -224,6 +224,9 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 	data.Attributes = attributesMap
+
+	// Set ID to DN
+	data.Id = data.DN
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -314,6 +317,9 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 			return
 		}
 	}
+
+	// Set ID to DN
+	data.Id = data.DN
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
