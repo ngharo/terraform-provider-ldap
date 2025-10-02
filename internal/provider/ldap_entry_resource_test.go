@@ -84,9 +84,9 @@ resource "ldap_entry" "test" {
   dn = %[1]q
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "test"
-    sn = "user"
-    mail = "test@example.com"
+    cn = ["test"]
+    sn = ["user"]
+    mail = ["test@example.com"]
   }
 }
 `, dn)
@@ -105,10 +105,10 @@ resource "ldap_entry" "test" {
   dn = %[1]q
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "test"
-    sn = "user"
-    mail = "test.updated@example.com"
-    description = "Updated user"
+    cn = ["test"]
+    sn = ["user"]
+    mail = ["test.updated@example.com"]
+    description = ["Updated user"]
   }
 }
 `, dn)

@@ -143,11 +143,11 @@ resource "ldap_entry" "user" {
   dn = "cn=testuser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "testuser"
-    sn = "Test"
-    givenName = "User"
-    mail = "testuser@example.com"
-    description = "Test user for integration testing"
+    cn = ["testuser"]
+    sn = ["Test"]
+    givenName = ["User"]
+    mail = ["testuser@example.com"]
+    description = ["Test user for integration testing"]
   }
 }
 
@@ -156,9 +156,9 @@ resource "ldap_entry" "group" {
   dn = "cn=testgroup,ou=groups,dc=example,dc=com"
   object_class = ["top", "groupOfNames"]
   attributes = {
-    cn = "testgroup"
-    description = "Test group for integration testing"
-    member = ldap_entry.user.dn
+    cn = ["testgroup"]
+    description = ["Test group for integration testing"]
+    member = [ldap_entry.user.dn]
   }
 }
 
@@ -199,9 +199,9 @@ resource "ldap_entry" "user" {
   dn = "cn=scopeuser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "scopeuser"
-    sn = "Scope"
-    givenName = "User"
+    cn = ["scopeuser"]
+    sn = ["Scope"]
+    givenName = ["User"]
   }
 }
 
@@ -242,10 +242,10 @@ resource "ldap_entry" "user_with_email" {
   dn = "cn=filteruser,ou=users,dc=example,dc=com"
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "filteruser"
-    sn = "Filter"
-    givenName = "User"
-    mail = "filteruser@example.com"
+    cn = ["filteruser"]
+    sn = ["Filter"]
+    givenName = ["User"]
+    mail = ["filteruser@example.com"]
   }
 }
 
@@ -253,9 +253,9 @@ resource "ldap_entry" "group" {
   dn = "cn=filtergroup,ou=groups,dc=example,dc=com"
   object_class = ["top", "groupOfNames"]
   attributes = {
-    cn = "filtergroup"
-    description = "Filter test group"
-    member = ldap_entry.user_with_email.dn
+    cn = ["filtergroup"]
+    description = ["Filter test group"]
+    member = [ldap_entry.user_with_email.dn]
   }
 }
 

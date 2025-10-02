@@ -69,8 +69,8 @@ resource "ldap_entry" "invalid" {
   dn = "invalid-dn-format"
   object_class = ["person"]
   attributes = {
-    cn = "test"
-    sn = "user"
+    cn = ["test"]
+    sn = ["user"]
   }
 }
 `
@@ -89,7 +89,7 @@ resource "ldap_entry" "missing_required" {
   dn = "cn=missing,ou=users,dc=example,dc=com"
   object_class = ["person"]
   attributes = {
-    cn = "missing"
+    cn = ["missing"]
     # Missing required 'sn' attribute for person objectClass
   }
 }
@@ -109,8 +109,8 @@ resource "ldap_entry" "original" {
   dn = %[1]q
   object_class = ["person"]
   attributes = {
-    cn = "duplicate"
-    sn = "Original"
+    cn = ["duplicate"]
+    sn = ["Original"]
   }
 }
 `, dn)
@@ -129,8 +129,8 @@ resource "ldap_entry" "original" {
   dn = %[1]q
   object_class = ["person"]
   attributes = {
-    cn = "duplicate"
-    sn = "Original"
+    cn = ["duplicate"]
+    sn = ["Original"]
   }
 }
 
@@ -138,8 +138,8 @@ resource "ldap_entry" "conflict" {
   dn = %[1]q
   object_class = ["person"]
   attributes = {
-    cn = "duplicate"
-    sn = "Conflict"
+    cn = ["duplicate"]
+    sn = ["Conflict"]
   }
 }
 `, dn)

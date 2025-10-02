@@ -63,8 +63,8 @@ resource "ldap_entry" "test" {
   dn = "cn=default-test,ou=users,dc=example,dc=com"
   object_class = ["person"]
   attributes = {
-    cn = "default-test"
-    sn = "Test"
+    cn = ["default-test"]
+    sn = ["Test"]
   }
 }
 `
@@ -83,8 +83,8 @@ resource "ldap_entry" "test" {
   dn = "cn=custom-port-test,ou=users,dc=example,dc=com"
   object_class = ["person"]
   attributes = {
-    cn = "custom-port-test"
-    sn = "Test"
+    cn = ["custom-port-test"]
+    sn = ["Test"]
   }
 }
 `

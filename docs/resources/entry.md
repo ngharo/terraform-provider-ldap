@@ -61,7 +61,7 @@ resource "ldap_entry" "department" {
 
 ### Optional
 
-- `attributes` (Map of String) Map of LDAP attributes for the entry. The keys are attribute names and values are attribute values. Required attributes depend on the object classes specified. Note that `objectClass` is automatically managed and should not be included here.
+- `attributes` (Map of List of String) Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. Note that `objectClass` is automatically managed and should not be included here.
 
 ### Read-Only
 

@@ -35,7 +35,7 @@ type LdapEntryResource struct {
 type LdapEntryResourceModel struct {
 	DN          types.String `tfsdk:"dn"`
 	ObjectClass types.List   `tfsdk:"object_class"`
-	Attributes  types.Map    `tfsdk:"attributes"`
+	Attributes  types.Map    `tfsdk:"attributes"` // Map of List[String]
 	Id          types.String `tfsdk:"id"`
 }
 
@@ -61,9 +61,9 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 				ElementType:         types.StringType,
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are attribute values. Required attributes depend on the object classes specified. Note that `objectClass` is automatically managed and should not be included here.",
+				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. Note that `objectClass` is automatically managed and should not be included here.",
 				Optional:            true,
-				ElementType:         types.StringType,
+				ElementType:         types.ListType{ElemType: types.StringType},
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -117,15 +117,21 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// Convert attributes from Map to map[string][]string
 	attributes := make(map[string][]string)
 	if !data.Attributes.IsNull() {
-		attrsMap := make(map[string]string)
+		attrsMap := make(map[string]types.List)
 		diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 
-		for key, value := range attrsMap {
-			attributes[key] = []string{value}
+		for key, valueList := range attrsMap {
+			var values []string
+			diags := valueList.ElementsAs(ctx, &values, false)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			attributes[key] = values
 		}
 	}
 
@@ -209,16 +215,14 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	data.ObjectClass = objectClassList
 
 	// Update attributes (excluding objectClass)
-	attrsMap := make(map[string]string)
+	attrsMap := make(map[string][]string)
 	for _, attr := range entry.Attributes {
 		if strings.ToLower(attr.Name) != "objectclass" {
-			if len(attr.Values) > 0 {
-				attrsMap[attr.Name] = attr.Values[0] // Take first value for simplicity
-			}
+			attrsMap[attr.Name] = attr.Values
 		}
 	}
 
-	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.StringType, attrsMap)
+	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attrsMap)
 	resp.Diagnostics.Append(attrsDiags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -257,13 +261,24 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Convert new attributes from Map to map[string]string
-	newAttrsMap := make(map[string]string)
+	// Convert new attributes from Map to map[string][]string
+	newAttrsMap := make(map[string][]string)
 	if !data.Attributes.IsNull() {
-		diags := data.Attributes.ElementsAs(ctx, &newAttrsMap, false)
+		attrsMap := make(map[string]types.List)
+		diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
+		}
+
+		for key, valueList := range attrsMap {
+			var values []string
+			diags := valueList.ElementsAs(ctx, &values, false)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			newAttrsMap[key] = values
 		}
 	}
 
@@ -275,12 +290,23 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	currentAttrsMap := make(map[string]string)
+	currentAttrsMap := make(map[string][]string)
 	if !currentData.Attributes.IsNull() {
-		diags := currentData.Attributes.ElementsAs(ctx, &currentAttrsMap, false)
+		attrsMap := make(map[string]types.List)
+		diags := currentData.Attributes.ElementsAs(ctx, &attrsMap, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
+		}
+
+		for key, valueList := range attrsMap {
+			var values []string
+			diags := valueList.ElementsAs(ctx, &values, false)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			currentAttrsMap[key] = values
 		}
 	}
 
@@ -293,9 +319,9 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	// Update attributes
-	for key, newValue := range newAttrsMap {
-		if currentValue, exists := currentAttrsMap[key]; !exists || currentValue != newValue {
-			modifyReq.Replace(key, []string{newValue})
+	for key, newValues := range newAttrsMap {
+		if currentValues, exists := currentAttrsMap[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
+			modifyReq.Replace(key, newValues)
 		}
 	}
 

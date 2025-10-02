@@ -118,14 +118,14 @@ resource "ldap_entry" "inetorg_user" {
   dn = %[1]q
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
-    cn = "john.doe"
-    sn = "Doe"
-    givenName = "John"
-    mail = "john.doe@example.com"
-    telephoneNumber = "+1-555-123-4567"
-    employeeNumber = "12345"
-    departmentNumber = "Engineering"
-    title = "Software Engineer"
+    cn = ["john.doe"]
+    sn = ["Doe"]
+    givenName = ["John"]
+    mail = ["john.doe@example.com"]
+    telephoneNumber = ["+1-555-123-4567"]
+    employeeNumber = ["12345"]
+    departmentNumber = ["Engineering"]
+    title = ["Software Engineer"]
   }
 }
 `, dn)
@@ -144,9 +144,9 @@ resource "ldap_entry" "test_group" {
   dn = %[1]q
   object_class = ["top", "groupOfNames"]
   attributes = {
-    cn = "developers"
-    description = "Development team group"
-    member = "cn=john.doe,ou=users,dc=example,dc=com"
+    cn = ["developers"]
+    description = ["Development team group"]
+    member = ["cn=john.doe,ou=users,dc=example,dc=com"]
   }
 }
 `, dn)
@@ -165,8 +165,8 @@ resource "ldap_entry" "minimal" {
   dn = %[1]q
   object_class = ["person"]
   attributes = {
-    cn = "minimal"
-    sn = "User"
+    cn = ["minimal"]
+    sn = ["User"]
   }
 }
 `, dn)
