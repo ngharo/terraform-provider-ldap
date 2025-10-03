@@ -1,7 +1,7 @@
-default: fmt lint install generate
+default: fmt lint build docs
 
 build: clean
-	go build -v ./...
+	go build -v
 
 install: build
 	go install -v ./...
@@ -9,24 +9,19 @@ install: build
 lint:
 	golangci-lint run
 
-generate:
+docs:
 	cd tools; go generate ./...
 
 fmt:
 	gofmt -s -w -e .
 
-test:
-	go test -v -cover -timeout=120s -parallel=10 ./...
-
-testacc: clean testcontainer-run
+test: clean testenv
 	TF_ACC=1 go test -v -cover -timeout 120m ./...
 
-testcontainer:
+testenv: .testenv-container-id
 	podman build -t terraform-provider-ldap:latest test/
 
-testcontainer-run: testcontainer .test-container-id
-
-.test-container-id:
+.testenv-container-id:
 	@echo "Starting test container..."
 	podman run -d --rm -p 3389:1389 terraform-provider-ldap:latest > $@
 	@echo "Container ID: $$(cat $@)"
@@ -34,12 +29,12 @@ testcontainer-run: testcontainer .test-container-id
 	@sleep 5
 
 clean:
-	@if [ -f .test-container-id ]; then \
+	@if [ -f .testenv-container-id ]; then \
 		echo "Stopping test container: $$(cat .test-container-id)"; \
 		podman stop "$$(cat .test-container-id)" 2>/dev/null || true; \
-		rm -f .test-container-id; \
+		rm -f .testenv-container-id; \
 	fi
 	rm -f terraform-provider-ldap
 	@echo "Cleaned up build and test artifacts"
 
-.PHONY: fmt lint test testacc build install generate testcontainer testcontainer-run clean
+.PHONY: fmt lint test build install docs testenv clean

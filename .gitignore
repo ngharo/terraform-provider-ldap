@@ -34,4 +34,5 @@ website/vendor
 # Keep windows files with windows line endings
 *.winfile eol=crlf
 
-.test-container-id
+.testenv-container-id
+terraform-provider-ldap_v*

@@ -2,20 +2,27 @@
 
 This Terraform provider allows you to manage LDAP (Lightweight Directory Access Protocol) entries using Terraform, enabling infrastructure as code practices for directory services.
 
-## Features
+This provider focuses on providing primitive LDAP operations without enforcing specific directory schemas, since LDAP schemas vary significantly
+between implementations (OpenLDAP, Active Directory, etc.). Recommend wrapping inside reusable modules for common entry types (users, groups, OUs).
 
-- **LDAP Entry Management**: Create, read, update, and delete LDAP entries
-- **Object Class Support**: Support for various LDAP object classes (person, organizationalPerson, inetOrgPerson, groupOfNames, etc.)
-- **Attribute Management**: Flexible attribute management with validation
-- **Import Support**: Import existing LDAP entries into Terraform state
-- **TLS Support**: Secure connections with TLS/LDAPS
-- **Environment Variables**: Configuration via environment variables
+## Resources and Data Sources
 
-## Requirements
+- **`ldap_entry`**: Manage LDAP entries (Create, Read, Update, Delete)
+- **`ldap_search`**: Query LDAP directories for existing entries
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.23 (for development)
-- Access to an LDAP server (OpenLDAP, Active Directory, etc.)
+## Documentation
+
+- [Provider Documentation](./docs/index.md)
+- [ldap_entry Resource](./docs/resources/entry.md)
+- [ldap_search Data Source](./docs/data-sources/search.md)
+
+### Import
+
+Import existing LDAP entries using their DN:
+
+```bash
+terraform import ldap_entry.user "cn=john.doe,ou=users,dc=example,dc=com"
+```
 
 ## Quick Start
 
@@ -40,6 +47,8 @@ provider "ldap" {
 
 ### 2. Create LDAP Entries
 
+LDAP attributes are inherently multi-valued. This provider supports this by requiring all attributes to be specified as lists of strings:
+
 ```terraform
 # Create a user entry
 resource "ldap_entry" "user" {
@@ -47,10 +56,14 @@ resource "ldap_entry" "user" {
   object_class = ["person", "organizationalPerson", "inetOrgPerson"]
 
   attributes = {
-    cn        = "john.doe"
-    sn        = "Doe"
-    givenName = "John"
-    mail      = "john.doe@example.com"
+    cn        = ["john.doe"]
+    sn        = ["Doe"]
+    givenName = ["John"]
+    mail = [
+      "john.doe@example.com",
+      "john.doe@company.example.com",
+      "j.doe@example.com",
+    ]
   }
 }
 
@@ -60,17 +73,40 @@ resource "ldap_entry" "group" {
   object_class = ["top", "groupOfNames"]
 
   attributes = {
-    cn          = "developers"
-    description = "Development team"
-    member      = ldap_entry.user.dn
+    cn          = ["developers"]
+    description = ["Development team"]
+    member      = [
+      ldap_entry.user.dn,
+      "cn=admin,ou=users,dc=example,dc=com",
+    ]
   }
 }
 ```
 
-## Documentation
+### 3. LDAP Search Data Source
 
-- [Provider Documentation](./docs/index.md)
-- [ldap_entry Resource](./docs/resources/entry.md)
+Query your LDAP directory to find entries and access their attributes:
+
+```terraform
+# Search for all users with email addresses
+data "ldap_search" "users_with_email" {
+  basedn = "ou=users,dc=example,dc=com"
+  filter = "(&(objectClass=person)(mail=*))"
+  requested_attributes = ["cn", "mail", "telephoneNumber"]
+}
+
+# Output user information
+# Note: attributes are always returned as lists
+output "user_emails" {
+  value = [
+    for result in data.ldap_search.users_with_email.results : {
+      name   = result.attributes.cn[0]
+      emails = result.attributes.mail[0]
+      phones = try(result.attributes.telephoneNumber[0], "")
+    }
+  ]
+}
+```
 
 ## Development
 
@@ -82,22 +118,16 @@ go build
 
 ### Running Tests
 
-```bash
-# Unit tests
-go test ./internal/provider/
+To run launch a containerized LDAP server and run the tests:
 
-# Acceptance tests (requires running LDAP server)
-TF_ACC=1 go test ./internal/provider/ -v -timeout 10m
+```bash
+make test
 ```
 
-### Testing with Local LDAP Server
-
-A containerized OpenLDAP server is provided for testing:
+A containerized OpenLDAP server is provided for testing (requires podman):
 
 ```bash
-cd test
-podman build -t openldap-test -f Containerfile .
-podman run -d -p 3389:1389 --name ldap-test openldap-test
+make testenv
 ```
 
 The test server provides:
@@ -109,54 +139,8 @@ The test server provides:
 ### Generating Documentation
 
 ```bash
-cd tools
-go generate
+make docs
 ```
-
-## Provider Configuration
-
-| Attribute | Type | Description | Environment Variable |
-|-----------|------|-------------|---------------------|
-| `host` | string | LDAP server hostname/IP | `LDAP_HOST` |
-| `port` | number | LDAP server port (389/636) | `LDAP_PORT` |
-| `bind_dn` | string | Bind DN for authentication | `LDAP_BIND_DN` |
-| `bind_password` | string | Bind password | `LDAP_BIND_PASSWORD` |
-| `use_tls` | boolean | Use TLS connection | `LDAP_USE_TLS` |
-
-## LDAP Entry Resource
-
-The `ldap_entry` resource manages individual LDAP entries with the following attributes:
-
-- **`dn`** (required): Distinguished Name - unique identifier for the entry
-- **`object_class`** (required): List of object classes defining the entry schema
-- **`attributes`** (optional): Map of LDAP attributes (excluding objectClass)
-
-### Import
-
-Import existing LDAP entries using their DN:
-
-```bash
-terraform import ldap_entry.user "cn=john.doe,ou=users,dc=example,dc=com"
-```
-
-## Common Object Classes
-
-| Object Class | Required Attributes | Common Use |
-|--------------|-------------------|------------|
-| `person` | `cn`, `sn` | Basic person entries |
-| `organizationalPerson` | `cn`, `sn` | People in organizations |
-| `inetOrgPerson` | `cn`, `sn` | Internet-enabled people |
-| `groupOfNames` | `cn`, `member` | Groups with members |
-| `organizationalUnit` | `ou` | Organizational containers |
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Run the test suite
-6. Submit a pull request
 
 ## License
 
@@ -166,4 +150,3 @@ This project is licensed under the Mozilla Public License 2.0 - see the [LICENSE
 
 - [Issues](https://github.com/ngharo/terraform-provider-ldap/issues)
 - [Terraform Provider Development Documentation](https://developer.hashicorp.com/terraform/plugin)
-- [LDAP Documentation](https://ldap.com/)
