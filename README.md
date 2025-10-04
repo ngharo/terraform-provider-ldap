@@ -1,64 +1,152 @@
-# Terraform Provider Scaffolding (Terraform Plugin Framework)
+# Terraform Provider for LDAP
 
-_This template repository is built on the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework). The template repository built on the [Terraform Plugin SDK](https://github.com/hashicorp/terraform-plugin-sdk) can be found at [terraform-provider-scaffolding](https://github.com/hashicorp/terraform-provider-scaffolding). See [Which SDK Should I Use?](https://developer.hashicorp.com/terraform/plugin/framework-benefits) in the Terraform documentation for additional information._
+This Terraform provider allows you to manage LDAP (Lightweight Directory Access Protocol) entries using Terraform, enabling infrastructure as code practices for directory services.
 
-This repository is a *template* for a [Terraform](https://www.terraform.io) provider. It is intended as a starting point for creating Terraform providers, containing:
+This provider focuses on providing primitive LDAP operations without enforcing specific directory schemas, since LDAP schemas vary significantly
+between implementations (OpenLDAP, Active Directory, etc.). Recommend wrapping inside reusable modules for common entry types (users, groups, OUs).
 
-- A resource and a data source (`internal/provider/`),
-- Examples (`examples/`) and generated documentation (`docs/`),
-- Miscellaneous meta files.
+## Resources and Data Sources
 
-These files contain boilerplate code that you will need to edit to create your own Terraform provider. Tutorials for creating Terraform providers can be found on the [HashiCorp Developer](https://developer.hashicorp.com/terraform/tutorials/providers-plugin-framework) platform. _Terraform Plugin Framework specific guides are titled accordingly._
+- **`ldap_entry`**: Manage LDAP entries (Create, Read, Update, Delete)
+- **`ldap_search`**: Query LDAP directories for existing entries
 
-Please see the [GitHub template repository documentation](https://help.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template) for how to create a new repository from this template on GitHub.
+## Documentation
 
-Once you've written your provider, you'll want to [publish it on the Terraform Registry](https://developer.hashicorp.com/terraform/registry/providers/publishing) so that others can use it.
+- [Provider Documentation](./docs/index.md)
+- [ldap_entry Resource](./docs/resources/entry.md)
+- [ldap_search Data Source](./docs/data-sources/search.md)
 
-## Requirements
+### Import
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.23
+Import existing LDAP entries using their DN:
 
-## Building The Provider
-
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
-
-```shell
-go install
+```bash
+terraform import ldap_entry.user "cn=john.doe,ou=users,dc=example,dc=com"
 ```
 
-## Adding Dependencies
+## Quick Start
 
-This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
+### 1. Configure the Provider
 
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
+```terraform
+terraform {
+  required_providers {
+    ldap = {
+      source = "registry.terraform.io/ngharo/ldap"
+    }
+  }
+}
 
-```shell
-go get github.com/author/dependency
-go mod tidy
+provider "ldap" {
+  host          = "ldap.example.com"
+  port          = 389
+  bind_dn       = "cn=admin,dc=example,dc=com"
+  bind_password = var.ldap_password
+}
 ```
 
-Then commit the changes to `go.mod` and `go.sum`.
+### 2. Create LDAP Entries
 
-## Using the provider
+LDAP attributes are inherently multi-valued. This provider supports this by requiring all attributes to be specified as lists of strings:
 
-Fill this in for each provider
+```terraform
+# Create a user entry
+resource "ldap_entry" "user" {
+  dn = "cn=john.doe,ou=users,dc=example,dc=com"
+  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
 
-## Developing the Provider
+  attributes = {
+    cn        = ["john.doe"]
+    sn        = ["Doe"]
+    givenName = ["John"]
+    mail = [
+      "john.doe@example.com",
+      "john.doe@company.example.com",
+      "j.doe@example.com",
+    ]
+  }
+}
 
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).
+# Create a group entry
+resource "ldap_entry" "group" {
+  dn = "cn=developers,ou=groups,dc=example,dc=com"
+  object_class = ["top", "groupOfNames"]
 
-To compile the provider, run `go install`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
-
-To generate or update documentation, run `make generate`.
-
-In order to run the full suite of Acceptance tests, run `make testacc`.
-
-*Note:* Acceptance tests create real resources, and often cost money to run.
-
-```shell
-make testacc
+  attributes = {
+    cn          = ["developers"]
+    description = ["Development team"]
+    member      = [
+      ldap_entry.user.dn,
+      "cn=admin,ou=users,dc=example,dc=com",
+    ]
+  }
+}
 ```
+
+### 3. LDAP Search Data Source
+
+Query your LDAP directory to find entries and access their attributes:
+
+```terraform
+# Search for all users with email addresses
+data "ldap_search" "users_with_email" {
+  basedn = "ou=users,dc=example,dc=com"
+  filter = "(&(objectClass=person)(mail=*))"
+  requested_attributes = ["cn", "mail", "telephoneNumber"]
+}
+
+# Output user information
+# Note: attributes are always returned as lists
+output "user_emails" {
+  value = [
+    for result in data.ldap_search.users_with_email.results : {
+      name   = result.attributes.cn[0]
+      emails = result.attributes.mail[0]
+      phones = try(result.attributes.telephoneNumber[0], "")
+    }
+  ]
+}
+```
+
+## Development
+
+### Building the Provider
+
+```bash
+go build
+```
+
+### Running Tests
+
+To run launch a containerized LDAP server and run the tests:
+
+```bash
+make test
+```
+
+A containerized OpenLDAP server is provided for testing (requires podman):
+
+```bash
+make testenv
+```
+
+The test server provides:
+- Host: `localhost:3389`
+- Bind DN: `cn=Manager,dc=example,dc=com`
+- Password: `secret`
+- Base DN: `dc=example,dc=com`
+
+### Generating Documentation
+
+```bash
+make docs
+```
+
+## License
+
+This project is licensed under the Mozilla Public License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+- [Issues](https://github.com/ngharo/terraform-provider-ldap/issues)
+- [Terraform Provider Development Documentation](https://developer.hashicorp.com/terraform/plugin)

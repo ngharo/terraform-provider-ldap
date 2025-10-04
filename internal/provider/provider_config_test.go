@@ -1,0 +1,91 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
+package provider
+
+import (
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+)
+
+func TestAccProvider_DefaultConfiguration(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfigDefault(),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("cn=default-test,ou=users,dc=example,dc=com"),
+					),
+				},
+			},
+		},
+	})
+}
+
+func TestAccProvider_CustomPortConfiguration(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfigCustomPort(),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("cn=custom-port-test,ou=users,dc=example,dc=com"),
+					),
+				},
+			},
+		},
+	})
+}
+
+func testAccProviderConfigDefault() string {
+	return `
+provider "ldap" {
+  # Using default host (localhost) and explicit settings
+  port = 3389
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test" {
+  dn = "cn=default-test,ou=users,dc=example,dc=com"
+  object_class = ["person"]
+  attributes = {
+    cn = ["default-test"]
+    sn = ["Test"]
+  }
+}
+`
+}
+
+func testAccProviderConfigCustomPort() string {
+	return `
+provider "ldap" {
+  host = "localhost"
+  port = 3389
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test" {
+  dn = "cn=custom-port-test,ou=users,dc=example,dc=com"
+  object_class = ["person"]
+  attributes = {
+    cn = ["custom-port-test"]
+    sn = ["Test"]
+  }
+}
+`
+}
