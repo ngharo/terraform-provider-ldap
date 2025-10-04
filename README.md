@@ -139,7 +139,7 @@ The test server provides:
 ### Generating Documentation
 
 ```bash
-make docs
+make generate
 ```
 
 ## License

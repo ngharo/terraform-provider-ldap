@@ -9,7 +9,7 @@ install: build
 lint:
 	golangci-lint run
 
-docs:
+generate:
 	cd tools; go generate ./...
 
 fmt:
