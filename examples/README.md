@@ -1,9 +1,56 @@
 # Examples
 
-This directory contains examples that are mostly used for documentation, but can also be run/tested manually via the Terraform CLI.
+This directory contains examples for the Terraform LDAP Provider that demonstrate how to configure and use the provider to manage LDAP entries.
 
-The document generation tool looks for files in the following locations by default. All other *.tf files besides the ones mentioned below are ignored by the documentation tool. This is useful for creating examples that can run and/or are testable even if some parts are not relevant for the documentation.
+## Directory Structure
 
-* **provider/provider.tf** example file for the provider index page
-* **data-sources/`full data source name`/data-source.tf** example file for the named data source page
-* **resources/`full resource name`/resource.tf** example file for the named data source page
+* **provider/provider.tf** - Example provider configuration showing authentication options
+* **resources/ldap_entry/resource.tf** - Example LDAP entry resource configurations
+* **resources/ldap_entry/import.sh** - Example import commands for existing LDAP entries
+
+## Running Examples
+
+To run these examples:
+
+1. Set up an LDAP server (see test/Containerfile for a local test server)
+2. Update provider configuration with your LDAP server details
+3. Initialize and apply:
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+## Test LDAP Server
+
+A containerized OpenLDAP server is provided for testing examples:
+
+```bash
+cd ../test
+podman build -t openldap-test -f Containerfile .
+podman run -d -p 3389:1389 --name ldap-test openldap-test
+```
+
+Then use these provider settings:
+
+```terraform
+provider "ldap" {
+  host          = "localhost"
+  port          = 3389
+  bind_dn       = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+```
+
+## LDAP Entry Examples
+
+The examples demonstrate:
+
+- Creating user entries with person/organizationalPerson/inetOrgPerson object classes
+- Creating group entries with groupOfNames object class
+- Creating organizational unit entries
+- Using attribute references between resources
+- Importing existing LDAP entries
+
+Each example includes the necessary object classes and required attributes for valid LDAP entries.

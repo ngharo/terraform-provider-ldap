@@ -1,0 +1,24 @@
+FROM alpine:latest
+
+# Install OpenLDAP and required utilities
+RUN apk add --no-cache openldap openldap-back-mdb openldap-clients openldap-overlay-memberof openldap-overlay-refint
+
+# Copy configuration files
+COPY assets/slapd.conf /etc/openldap/slapd.conf
+COPY assets/slapd.ldif /etc/openldap/slapd.ldif
+COPY assets/base.ldif /etc/openldap/base.ldif
+COPY assets/start-ldap.sh /usr/local/bin/start-ldap.sh
+
+# Set proper ownership for all files
+RUN chown -R ldap:ldap /etc/openldap && chmod +x /usr/local/bin/start-ldap.sh
+
+# Expose LDAP port
+EXPOSE 1389
+
+# Switch to ldap user
+USER ldap
+
+RUN slapadd -b "dc=example,dc=com" -v -l /etc/openldap/base.ldif
+
+# Start the LDAP server
+CMD ["/usr/local/bin/start-ldap.sh"]

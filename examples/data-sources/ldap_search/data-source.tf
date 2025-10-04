@@ -1,0 +1,114 @@
+# Basic search for all user entries
+data "ldap_search" "all_users" {
+  basedn = "ou=users,dc=example,dc=com"
+  filter = "(objectClass=person)"
+}
+
+# Search with specific attributes
+data "ldap_search" "user_emails" {
+  basedn               = "ou=users,dc=example,dc=com"
+  filter               = "(objectClass=person)"
+  requested_attributes = ["cn", "mail", "uid"]
+}
+
+# Search with different scopes
+data "ldap_search" "base_entry" {
+  basedn = "cn=admin,dc=example,dc=com"
+  scope  = "base"
+  filter = "(objectClass=*)"
+}
+
+data "ldap_search" "direct_children" {
+  basedn = "dc=example,dc=com"
+  scope  = "one"
+  filter = "(objectClass=organizationalUnit)"
+}
+
+# Complex filter example
+data "ldap_search" "active_users_with_email" {
+  basedn               = "ou=users,dc=example,dc=com"
+  filter               = "(&(objectClass=person)(mail=*))"
+  requested_attributes = ["cn", "mail", "sAMAccountName"]
+}
+
+# Search for groups
+data "ldap_search" "admin_groups" {
+  basedn               = "ou=groups,dc=example,dc=com"
+  filter               = "(&(objectClass=group)(cn=*admin*))"
+  requested_attributes = ["cn", "description", "member"]
+}
+
+# Output examples using the new structure
+output "user_count" {
+  description = "Total number of users found"
+  value       = length(data.ldap_search.all_users.results)
+}
+
+output "user_dns" {
+  description = "List of all user DNs"
+  value       = [for result in data.ldap_search.all_users.results : result.dn]
+}
+
+output "users_with_email" {
+  description = "Users that have email addresses"
+  value = [
+    for result in data.ldap_search.user_emails.results : {
+      dn    = result.dn
+      name  = try(result.attributes.cn[0], "Unknown")
+      email = try(result.attributes.mail[0], "")
+      uid   = try(result.attributes.uid[0], "")
+    }
+  ]
+}
+
+# Local values for processing results
+locals {
+  active_users = [
+    for result in data.ldap_search.active_users_with_email.results : {
+      dn           = result.dn
+      display_name = try(result.attributes.cn[0], "Unknown")
+      email        = try(result.attributes.mail[0], "")
+      username     = try(result.attributes.sAMAccountName[0], "")
+      has_email    = length(try(result.attributes.mail, [])) > 0
+    }
+  ]
+}
+
+output "active_user_emails" {
+  description = "Email addresses of active users"
+  value       = [for user in local.active_users : user.email if user.has_email]
+}
+
+# Working with multi-valued attributes
+output "all_group_members" {
+  description = "All members from admin groups (flattened)"
+  value = flatten([
+    for result in data.ldap_search.admin_groups.results :
+    try(result.attributes.member, [])
+  ])
+}
+
+# Filtering results based on attributes
+output "users_with_multiple_emails" {
+  description = "Users who have multiple email addresses"
+  value = [
+    for result in data.ldap_search.user_emails.results : {
+      dn     = result.dn
+      name   = try(result.attributes.cn[0], "Unknown")
+      emails = try(result.attributes.mail, [])
+    }
+    if length(try(result.attributes.mail, [])) > 1
+  ]
+}
+
+# Checking for attribute existence
+output "users_missing_email" {
+  description = "Users without email addresses"
+  value = [
+    for result in data.ldap_search.all_users.results : {
+      dn   = result.dn
+      name = try(result.attributes.cn[0], "Unknown")
+    }
+    if length(try(result.attributes.mail, [])) == 0
+  ]
+}
