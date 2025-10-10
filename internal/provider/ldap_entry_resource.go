@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -33,10 +34,12 @@ type LdapEntryResource struct {
 
 // LdapEntryResourceModel describes the resource data model.
 type LdapEntryResourceModel struct {
-	DN          types.String `tfsdk:"dn"`
-	ObjectClass types.List   `tfsdk:"object_class"`
-	Attributes  types.Map    `tfsdk:"attributes"` // Map of List[String]
-	Id          types.String `tfsdk:"id"`
+	DN              types.String `tfsdk:"dn"`
+	ObjectClass     types.List   `tfsdk:"object_class"`
+	Attributes      types.Map    `tfsdk:"attributes"`            // Map of List[String]
+	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of List[String] - write-only
+	AttributesWOVer types.Int64  `tfsdk:"attributes_wo_version"` // Version trigger for attributes_wo
+	Id              types.String `tfsdk:"id"`
 }
 
 func (r *LdapEntryResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -64,6 +67,16 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. Note that `objectClass` is automatically managed and should not be included here.",
 				Optional:            true,
 				ElementType:         types.ListType{ElemType: types.StringType},
+			},
+			"attributes_wo": schema.MapAttribute{
+				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. The keys are attribute names and values are lists of attribute values. These attributes are never stored in Terraform state and are only used during resource creation and updates. Use this for sensitive data like passwords, API keys, or other secrets. Must be used in conjunction with `attributes_wo_version`. Requires Terraform 1.11 or later. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
+				Optional:            true,
+				WriteOnly:           true,
+				ElementType:         types.ListType{ElemType: types.StringType},
+			},
+			"attributes_wo_version": schema.Int64Attribute{
+				MarkdownDescription: "Version number for write-only attributes. Increment this value (e.g., 1, 2, 3) whenever you want to update the `attributes_wo` values on the LDAP server. Since write-only attributes are not stored in state, Terraform cannot detect changes to them. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.",
+				Optional:            true,
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -98,9 +111,17 @@ func (r *LdapEntryResource) Configure(ctx context.Context, req resource.Configur
 
 func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data LdapEntryResourceModel
+	var configData LdapEntryResourceModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Read config for write-only attributes
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -132,6 +153,44 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 				return
 			}
 			attributes[key] = values
+		}
+	}
+
+	// Convert write-only attributes from config (not plan)
+	if !configData.AttributesWO.IsNull() {
+		attrsWOMap := make(map[string]types.List)
+		diags := configData.AttributesWO.ElementsAs(ctx, &attrsWOMap, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for key, valueList := range attrsWOMap {
+			var values []string
+			diags := valueList.ElementsAs(ctx, &values, false)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+
+			// Special handling for unicodePwd attribute (Active Directory)
+			if strings.EqualFold(key, "unicodePwd") {
+				encodedValues := make([]string, len(values))
+				for i, val := range values {
+					encoded, err := encodeUnicodePwd(val)
+					if err != nil {
+						resp.Diagnostics.AddError(
+							"Error encoding unicodePwd",
+							fmt.Sprintf("Unable to encode unicodePwd value: %s", err),
+						)
+						return
+					}
+					encodedValues[i] = encoded
+				}
+				attributes[key] = encodedValues
+			} else {
+				attributes[key] = values
+			}
 		}
 	}
 
@@ -175,6 +234,18 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
+	// FIXME FIXME FIXME
+	// Build set of write-only attribute keys to exclude from state
+	// Since Read doesn't have access to config, we need to track which attributes
+	// were originally write-only. However, write-only attributes are never stored
+	// in state by the framework, so we can't read them here. The framework handles
+	// this automatically - write-only attributes won't appear in state.
+	// But LDAP might return them, so we need to exclude common write-only attrs.
+	writeOnlyKeys := make(map[string]bool)
+	// Common password attributes that should not be read into state
+	writeOnlyKeys["userpassword"] = true
+	writeOnlyKeys["unicodepwd"] = true
+
 	// Search for the LDAP entry
 	searchReq := ldap.NewSearchRequest(
 		data.DN.ValueString(),
@@ -214,10 +285,12 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 	data.ObjectClass = objectClassList
 
-	// Update attributes (excluding objectClass)
+	// Update attributes (excluding objectClass and write-only attributes)
 	attrsMap := make(map[string][]string)
 	for _, attr := range entry.Attributes {
-		if strings.ToLower(attr.Name) != "objectclass" {
+		attrNameLower := strings.ToLower(attr.Name)
+		// Exclude objectClass and any write-only attributes
+		if attrNameLower != "objectclass" && !writeOnlyKeys[attrNameLower] {
 			attrsMap[attr.Name] = attr.Values
 		}
 	}
@@ -238,9 +311,17 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data LdapEntryResourceModel
+	var configData LdapEntryResourceModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Read config for write-only attributes
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -279,6 +360,47 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 				return
 			}
 			newAttrsMap[key] = values
+		}
+	}
+
+	// Check if attributes_wo_version has changed
+	versionChanged := !data.AttributesWOVer.Equal(currentData.AttributesWOVer)
+
+	// Convert write-only attributes from config (not plan) only if version changed
+	if versionChanged && !configData.AttributesWO.IsNull() {
+		attrsWOMap := make(map[string]types.List)
+		diags := configData.AttributesWO.ElementsAs(ctx, &attrsWOMap, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for key, valueList := range attrsWOMap {
+			var values []string
+			diags := valueList.ElementsAs(ctx, &values, false)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+
+			// Special handling for unicodePwd attribute (Active Directory)
+			if strings.EqualFold(key, "unicodePwd") {
+				encodedValues := make([]string, len(values))
+				for i, val := range values {
+					encoded, err := encodeUnicodePwd(val)
+					if err != nil {
+						resp.Diagnostics.AddError(
+							"Error encoding unicodePwd",
+							fmt.Sprintf("Unable to encode unicodePwd value: %s", err),
+						)
+						return
+					}
+					encodedValues[i] = encoded
+				}
+				newAttrsMap[key] = encodedValues
+			} else {
+				newAttrsMap[key] = values
+			}
 		}
 	}
 
@@ -390,4 +512,16 @@ func stringSlicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// encodeUnicodePwd encodes a password for Active Directory's unicodePwd attribute.
+// The password must be enclosed in double quotes and encoded as UTF-16LE.
+// See: https://ldapwiki.com/wiki/Wiki.jsp?page=UnicodePwd
+func encodeUnicodePwd(password string) (string, error) {
+	utf16 := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	pwdEncoded, err := utf16.NewEncoder().String(fmt.Sprintf(`"%s"`, password))
+	if err != nil {
+		return "", err
+	}
+	return pwdEncoded, nil
 }
