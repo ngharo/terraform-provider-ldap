@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -233,6 +234,27 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		attributesToRequest = append(attributesToRequest, attrName)
 	}
 
+	// During import, state is empty, check if import specified which attributes to fetch
+	if len(attributesToRequest) == 0 {
+		// Check private state for import attributes
+		privateData, diags := req.Private.GetKey(ctx, "import_attributes")
+		resp.Diagnostics.Append(diags...)
+
+		if len(privateData) > 0 {
+			var importData map[string][]string
+			if err := json.Unmarshal(privateData, &importData); err == nil {
+				if attrs, ok := importData["import_attributes"]; ok {
+					attributesToRequest = attrs
+				}
+			}
+		}
+
+		// If still empty, default to objectClass only
+		if len(attributesToRequest) == 0 {
+			attributesToRequest = []string{"objectClass"}
+		}
+	}
+
 	// Search for the LDAP entry - only request managed attributes
 	searchReq := ldap.NewSearchRequest(
 		data.DN.ValueString(),
@@ -449,7 +471,44 @@ func (r *LdapEntryResource) Delete(ctx context.Context, req resource.DeleteReque
 }
 
 func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("dn"), req, resp)
+	// Import ID can be either:
+	// 1. Simple DN string: "CN=user,OU=Users,DC=example,DC=com"
+	// 2. JSON object: {"dn": "CN=user,OU=Users,DC=example,DC=com", "attributes": ["objectClass", "cn"]}
+
+	var dn string
+	var attributesToImport []string
+
+	// Try to parse as JSON first
+	var importSpec struct {
+		DN         string   `json:"dn"`
+		Attributes []string `json:"attributes"`
+	}
+
+	if err := json.Unmarshal([]byte(req.ID), &importSpec); err == nil {
+		// Successfully parsed as JSON
+		dn = importSpec.DN
+		attributesToImport = importSpec.Attributes
+	} else {
+		// Not JSON, treat as simple DN string
+		dn = req.ID
+		attributesToImport = []string{"objectClass"} // Default to just objectClass
+	}
+
+	// Set the DN in state
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("dn"), dn)...)
+
+	// Store the attributes to import in private state so Read can use them
+	if len(attributesToImport) > 0 {
+		privateData, err := json.Marshal(map[string][]string{"import_attributes": attributesToImport})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error encoding import attributes",
+				fmt.Sprintf("Unable to encode import attributes: %s", err),
+			)
+			return
+		}
+		resp.Private.SetKey(ctx, "import_attributes", privateData)
+	}
 }
 
 // AttributesSetSemanticsModifier is a plan modifier that treats list values as sets (order-independent).
