@@ -1,9 +1,7 @@
 #!/bin/bash
-# Import an existing LDAP entry using its DN
-terraform import ldap_entry.user "cn=john.doe,ou=users,dc=example,dc=com"
+# Simple DN (default - imports only objectClass):
+terraform import ldap_entry.user "CN=user,OU=Users,DC=example,DC=com"
 
-# Import a group entry
-terraform import ldap_entry.group "cn=developers,ou=groups,dc=example,dc=com"
-
-# Import an organizational unit
-terraform import ldap_entry.department "ou=engineering,dc=example,dc=com"
+# JSON with specific attributes:
+terraform import ldap_entry.user '{"dn": "CN=user,OU=Users,DC=example,DC=com", "attributes": ["objectClass", "cn", "sAMAccountName",
+  "userPrincipalName"]}'
