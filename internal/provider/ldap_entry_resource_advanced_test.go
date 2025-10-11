@@ -32,15 +32,6 @@ func TestAccLdapEntryResource_InetOrgPerson(t *testing.T) {
 						tfjsonpath.New("id"),
 						knownvalue.StringExact("cn=john.doe,ou=users,dc=example,dc=com"),
 					),
-					statecheck.ExpectKnownValue(
-						"ldap_entry.inetorg_user",
-						tfjsonpath.New("object_class"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("person"),
-							knownvalue.StringExact("organizationalPerson"),
-							knownvalue.StringExact("inetOrgPerson"),
-						}),
-					),
 				},
 			},
 			// ImportState testing
@@ -48,7 +39,7 @@ func TestAccLdapEntryResource_InetOrgPerson(t *testing.T) {
 				ResourceName:                         "ldap_entry.inetorg_user",
 				ImportState:                          true,
 				ImportStateVerify:                    true,
-				ImportStateVerifyIgnore:              []string{"object_class", "attributes"},
+				ImportStateVerifyIgnore:              []string{"attributes"},
 				ImportStateVerifyIdentifierAttribute: "dn",
 			},
 			// Delete testing automatically occurs in TestCase
@@ -69,14 +60,6 @@ func TestAccLdapEntryResource_Group(t *testing.T) {
 						"ldap_entry.test_group",
 						tfjsonpath.New("dn"),
 						knownvalue.StringExact("cn=developers,ou=groups,dc=example,dc=com"),
-					),
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_group",
-						tfjsonpath.New("object_class"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("top"),
-							knownvalue.StringExact("groupOfNames"),
-						}),
 					),
 				},
 			},
@@ -116,8 +99,8 @@ provider "ldap" {
 
 resource "ldap_entry" "inetorg_user" {
   dn = %[1]q
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["john.doe"]
     sn = ["Doe"]
     givenName = ["John"]
@@ -142,8 +125,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test_group" {
   dn = %[1]q
-  object_class = ["top", "groupOfNames"]
   attributes = {
+    objectClass = ["top", "groupOfNames"]
     cn = ["developers"]
     description = ["Development team group"]
     member = ["cn=john.doe,ou=users,dc=example,dc=com"]
@@ -163,8 +146,8 @@ provider "ldap" {
 
 resource "ldap_entry" "minimal" {
   dn = %[1]q
-  object_class = ["person"]
   attributes = {
+    objectClass = ["person"]
     cn = ["minimal"]
     sn = ["User"]
   }

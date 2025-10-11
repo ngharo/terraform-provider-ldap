@@ -89,8 +89,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test_writeonly" {
   dn = %[1]q
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["writeonly"]
     sn = ["User"]
   }
@@ -113,8 +113,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test_writeonly" {
   dn = %[1]q
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["writeonly"]
     sn = ["User"]
     description = ["Updated description"]

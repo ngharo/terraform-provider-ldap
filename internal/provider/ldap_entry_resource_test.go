@@ -35,15 +35,6 @@ func TestAccLdapEntryResource(t *testing.T) {
 						tfjsonpath.New("id"),
 						knownvalue.StringExact("cn=test,dc=example,dc=com"),
 					),
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test",
-						tfjsonpath.New("object_class"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("person"),
-							knownvalue.StringExact("organizationalPerson"),
-							knownvalue.StringExact("inetOrgPerson"),
-						}),
-					),
 				},
 			},
 			// ImportState testing
@@ -51,7 +42,7 @@ func TestAccLdapEntryResource(t *testing.T) {
 				ResourceName:            "ldap_entry.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"object_class", "attributes"},
+				ImportStateVerifyIgnore: []string{"attributes"},
 			},
 			// Update and Read testing
 			{
@@ -85,8 +76,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test" {
   dn = %[1]q
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["test"]
     sn = ["user"]
     mail = ["test@example.com"]
@@ -106,8 +97,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test" {
   dn = %[1]q
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["test"]
     sn = ["user"]
     mail = ["test.updated@example.com"]
