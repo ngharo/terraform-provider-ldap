@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) ngharo <root@ngha.ro>
 // SPDX-License-Identifier: MPL-2.0
 
 package provider
@@ -61,8 +61,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test" {
   dn = "cn=default-test,ou=users,dc=example,dc=com"
-  object_class = ["person"]
   attributes = {
+    objectClass = ["person"]
     cn = ["default-test"]
     sn = ["Test"]
   }
@@ -81,8 +81,8 @@ provider "ldap" {
 
 resource "ldap_entry" "test" {
   dn = "cn=custom-port-test,ou=users,dc=example,dc=com"
-  object_class = ["person"]
   attributes = {
+    objectClass = ["person"]
     cn = ["custom-port-test"]
     sn = ["Test"]
   }

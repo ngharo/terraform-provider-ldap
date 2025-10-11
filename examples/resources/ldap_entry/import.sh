@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Import an existing LDAP entry using its DN
 terraform import ldap_entry.user "cn=john.doe,ou=users,dc=example,dc=com"
 

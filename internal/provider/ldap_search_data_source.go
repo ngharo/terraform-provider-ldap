@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) ngharo <root@ngha.ro>
 // SPDX-License-Identifier: MPL-2.0
 
 package provider

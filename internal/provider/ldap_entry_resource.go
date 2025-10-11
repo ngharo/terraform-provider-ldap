@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) ngharo <root@ngha.ro>
 // SPDX-License-Identifier: MPL-2.0
 
 package provider
@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -35,7 +36,6 @@ type LdapEntryResource struct {
 // LdapEntryResourceModel describes the resource data model.
 type LdapEntryResourceModel struct {
 	DN              types.String `tfsdk:"dn"`
-	ObjectClass     types.List   `tfsdk:"object_class"`
 	Attributes      types.Map    `tfsdk:"attributes"`            // Map of List[String]
 	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of List[String] - write-only
 	AttributesWOVer types.Int64  `tfsdk:"attributes_wo_version"` // Version trigger for attributes_wo
@@ -58,15 +58,13 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"object_class": schema.ListAttribute{
-				MarkdownDescription: "List of object classes for the LDAP entry. Object classes define the schema and required attributes for the entry. Common values include `person`, `organizationalPerson`, `inetOrgPerson`, `groupOfNames`, and `organizationalUnit`.",
-				Required:            true,
-				ElementType:         types.StringType,
-			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. Note that `objectClass` is automatically managed and should not be included here.",
-				Optional:            true,
+				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. The `objectClass` attribute is required and defines the schema for the entry.",
+				Required:            true,
 				ElementType:         types.ListType{ElemType: types.StringType},
+				PlanModifiers: []planmodifier.Map{
+					AttributesSetSemanticsModifier{},
+				},
 			},
 			"attributes_wo": schema.MapAttribute{
 				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. The keys are attribute names and values are lists of attribute values. These attributes are never stored in Terraform state and are only used during resource creation and updates. Use this for sensitive data like passwords, API keys, or other secrets. Must be used in conjunction with `attributes_wo_version`. Requires Terraform 1.11 or later. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
@@ -127,33 +125,23 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	// Convert object classes from List to []string
-	var objectClasses []string
-	diags := data.ObjectClass.ElementsAs(ctx, &objectClasses, false)
+	// Convert attributes from Map to map[string][]string
+	attributes := make(map[string][]string)
+	attrsMap := make(map[string]types.List)
+	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Convert attributes from Map to map[string][]string
-	attributes := make(map[string][]string)
-	if !data.Attributes.IsNull() {
-		attrsMap := make(map[string]types.List)
-		diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+	for key, valueList := range attrsMap {
+		var values []string
+		diags := valueList.ElementsAs(ctx, &values, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-
-		for key, valueList := range attrsMap {
-			var values []string
-			diags := valueList.ElementsAs(ctx, &values, false)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			attributes[key] = values
-		}
+		attributes[key] = values
 	}
 
 	// Convert write-only attributes from config (not plan)
@@ -194,9 +182,6 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 		}
 	}
 
-	// Add objectClass attribute
-	attributes["objectClass"] = objectClasses
-
 	// Create LDAP add request
 	addReq := ldap.NewAddRequest(data.DN.ValueString(), nil)
 	for attr, values := range attributes {
@@ -234,19 +219,21 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	// FIXME FIXME FIXME
-	// Build set of write-only attribute keys to exclude from state
-	// Since Read doesn't have access to config, we need to track which attributes
-	// were originally write-only. However, write-only attributes are never stored
-	// in state by the framework, so we can't read them here. The framework handles
-	// this automatically - write-only attributes won't appear in state.
-	// But LDAP might return them, so we need to exclude common write-only attrs.
-	writeOnlyKeys := make(map[string]bool)
-	// Common password attributes that should not be read into state
-	writeOnlyKeys["userpassword"] = true
-	writeOnlyKeys["unicodepwd"] = true
+	// Build list of attributes to request from LDAP
+	// Only request attributes that are managed in the resource configuration
+	var attributesToRequest []string
 
-	// Search for the LDAP entry
+	var attrsMap map[string]types.List
+	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for attrName := range attrsMap {
+		attributesToRequest = append(attributesToRequest, attrName)
+	}
+
+	// Search for the LDAP entry - only request managed attributes
 	searchReq := ldap.NewSearchRequest(
 		data.DN.ValueString(),
 		ldap.ScopeBaseObject,
@@ -255,7 +242,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		0,
 		false,
 		"(objectClass=*)",
-		[]string{"*"},
+		attributesToRequest,
 		nil,
 	)
 
@@ -276,26 +263,14 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	entry := sr.Entries[0]
 
-	// Update object classes
-	objectClasses := entry.GetAttributeValues("objectClass")
-	objectClassList, objClassDiags := types.ListValueFrom(ctx, types.StringType, objectClasses)
-	resp.Diagnostics.Append(objClassDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	data.ObjectClass = objectClassList
-
-	// Update attributes (excluding objectClass and write-only attributes)
-	attrsMap := make(map[string][]string)
+	// Update attributes from LDAP response
+	// Since we only requested managed attributes, we can include all returned attributes
+	readAttrsMap := make(map[string][]string)
 	for _, attr := range entry.Attributes {
-		attrNameLower := strings.ToLower(attr.Name)
-		// Exclude objectClass and any write-only attributes
-		if attrNameLower != "objectclass" && !writeOnlyKeys[attrNameLower] {
-			attrsMap[attr.Name] = attr.Values
-		}
+		readAttrsMap[attr.Name] = attr.Values
 	}
 
-	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attrsMap)
+	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, readAttrsMap)
 	resp.Diagnostics.Append(attrsDiags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -334,33 +309,23 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Convert new object classes from List to []string
-	var newObjectClasses []string
-	diags := data.ObjectClass.ElementsAs(ctx, &newObjectClasses, false)
+	// Convert new attributes from Map to map[string][]string
+	newAttrsMap := make(map[string][]string)
+	attrsMap := make(map[string]types.List)
+	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Convert new attributes from Map to map[string][]string
-	newAttrsMap := make(map[string][]string)
-	if !data.Attributes.IsNull() {
-		attrsMap := make(map[string]types.List)
-		diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+	for key, valueList := range attrsMap {
+		var values []string
+		diags := valueList.ElementsAs(ctx, &values, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-
-		for key, valueList := range attrsMap {
-			var values []string
-			diags := valueList.ElementsAs(ctx, &values, false)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			newAttrsMap[key] = values
-		}
+		newAttrsMap[key] = values
 	}
 
 	// Check if attributes_wo_version has changed
@@ -404,43 +369,29 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 	}
 
-	// Get current object classes and attributes for comparison
-	var currentObjectClasses []string
-	diags = currentData.ObjectClass.ElementsAs(ctx, &currentObjectClasses, false)
+	// Get current attributes for comparison
+	currentAttrsMap := make(map[string][]string)
+	currentAttrsMapTF := make(map[string]types.List)
+	diags = currentData.Attributes.ElementsAs(ctx, &currentAttrsMapTF, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	currentAttrsMap := make(map[string][]string)
-	if !currentData.Attributes.IsNull() {
-		attrsMap := make(map[string]types.List)
-		diags := currentData.Attributes.ElementsAs(ctx, &attrsMap, false)
+	for key, valueList := range currentAttrsMapTF {
+		var values []string
+		diags := valueList.ElementsAs(ctx, &values, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-
-		for key, valueList := range attrsMap {
-			var values []string
-			diags := valueList.ElementsAs(ctx, &values, false)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			currentAttrsMap[key] = values
-		}
+		currentAttrsMap[key] = values
 	}
 
 	// Create LDAP modify request
 	modifyReq := ldap.NewModifyRequest(data.DN.ValueString(), nil)
 
-	// Update objectClass if changed
-	if !stringSlicesEqual(currentObjectClasses, newObjectClasses) {
-		modifyReq.Replace("objectClass", newObjectClasses)
-	}
-
-	// Update attributes
+	// Update attributes (including objectClass)
 	for key, newValues := range newAttrsMap {
 		if currentValues, exists := currentAttrsMap[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
 			modifyReq.Replace(key, newValues)
@@ -501,13 +452,98 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 	resource.ImportStatePassthroughID(ctx, path.Root("dn"), req, resp)
 }
 
-// Helper function to compare string slices.
+// AttributesSetSemanticsModifier is a plan modifier that treats list values as sets (order-independent).
+// This is necessary because LDAP returns multi-valued attributes in arbitrary order.
+type AttributesSetSemanticsModifier struct{}
+
+func (m AttributesSetSemanticsModifier) Description(ctx context.Context) string {
+	return "Treats attribute list values as unordered sets"
+}
+
+func (m AttributesSetSemanticsModifier) MarkdownDescription(ctx context.Context) string {
+	return "Treats attribute list values as unordered sets"
+}
+
+func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
+	// If config and state are both known, compare them as sets
+	if req.ConfigValue.IsNull() || req.StateValue.IsNull() {
+		return
+	}
+
+	if req.ConfigValue.IsUnknown() || req.StateValue.IsUnknown() {
+		return
+	}
+
+	// Extract config and state as maps of lists
+	var configMap map[string]types.List
+	var stateMap map[string]types.List
+
+	diags := req.ConfigValue.ElementsAs(ctx, &configMap, false)
+	if diags.HasError() {
+		return
+	}
+
+	diags = req.StateValue.ElementsAs(ctx, &stateMap, false)
+	if diags.HasError() {
+		return
+	}
+
+	// Check if all attributes are equal as sets
+	allEqual := true
+	if len(configMap) != len(stateMap) {
+		allEqual = false
+	} else {
+		for key, configList := range configMap {
+			stateList, ok := stateMap[key]
+			if !ok {
+				allEqual = false
+				break
+			}
+
+			var configValues []string
+			var stateValues []string
+
+			diags = configList.ElementsAs(ctx, &configValues, false)
+			if diags.HasError() {
+				return
+			}
+
+			diags = stateList.ElementsAs(ctx, &stateValues, false)
+			if diags.HasError() {
+				return
+			}
+
+			// Use order-independent comparison
+			if !stringSlicesEqual(configValues, stateValues) {
+				allEqual = false
+				break
+			}
+		}
+	}
+
+	// If all attributes are equal as sets, use state value to prevent spurious diff
+	if allEqual {
+		resp.PlanValue = req.StateValue
+	}
+}
+
+// Helper function to compare string slices as sets (order-independent).
+// LDAP multi-valued attributes are unordered, so we need to compare them as sets.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i, v := range a {
-		if v != b[i] {
+
+	// Sort copies to compare as sets
+	aSorted := make([]string, len(a))
+	bSorted := make([]string, len(b))
+	copy(aSorted, a)
+	copy(bSorted, b)
+	sort.Strings(aSorted)
+	sort.Strings(bSorted)
+
+	for i, v := range aSorted {
+		if v != bSorted[i] {
 			return false
 		}
 	}

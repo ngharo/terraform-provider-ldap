@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) ngharo <root@ngha.ro>
 // SPDX-License-Identifier: MPL-2.0
 
 package provider
@@ -177,8 +177,8 @@ provider "ldap" {
 # Create a user entry (base DN and OUs already exist in container)
 resource "ldap_entry" "user" {
   dn = "cn=testuser,ou=users,dc=example,dc=com"
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["testuser"]
     sn = ["Test"]
     givenName = ["User"]
@@ -190,8 +190,8 @@ resource "ldap_entry" "user" {
 # Create a group entry
 resource "ldap_entry" "group" {
   dn = "cn=testgroup,ou=groups,dc=example,dc=com"
-  object_class = ["top", "groupOfNames"]
   attributes = {
+    objectClass = ["top", "groupOfNames"]
     cn = ["testgroup"]
     description = ["Test group for integration testing"]
     member = [ldap_entry.user.dn]
@@ -244,8 +244,8 @@ provider "ldap" {
 # Create a user to find with subtree search (base DN and OUs already exist in container)
 resource "ldap_entry" "user" {
   dn = "cn=scopeuser,ou=users,dc=example,dc=com"
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["scopeuser"]
     sn = ["Scope"]
     givenName = ["User"]
@@ -298,8 +298,8 @@ provider "ldap" {
 # Create test entries (base DN and OUs already exist in container)
 resource "ldap_entry" "user_with_email" {
   dn = "cn=filteruser,ou=users,dc=example,dc=com"
-  object_class = ["person", "organizationalPerson", "inetOrgPerson"]
   attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
     cn = ["filteruser"]
     sn = ["Filter"]
     givenName = ["User"]
@@ -309,8 +309,8 @@ resource "ldap_entry" "user_with_email" {
 
 resource "ldap_entry" "group" {
   dn = "cn=filtergroup,ou=groups,dc=example,dc=com"
-  object_class = ["top", "groupOfNames"]
   attributes = {
+    objectClass = ["top", "groupOfNames"]
     cn = ["filtergroup"]
     description = ["Filter test group"]
     member = [ldap_entry.user_with_email.dn]
