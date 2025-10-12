@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -115,28 +115,6 @@ func (r *LdapEntryResource) Configure(ctx context.Context, req resource.Configur
 	r.client = client
 }
 
-// tfMapToLDAPAttrs converts a Terraform Map type to LDAP attribute format (map[string][]string).
-// It extracts the map elements and populates the attrs parameter with the converted values.
-func (r *LdapEntryResource) tfMapToLDAPAttrs(ctx context.Context, resp *resource.CreateResponse, tfMap *types.Map, attrs map[string][]string) {
-	attrsMap := make(map[string]types.List)
-
-	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	for key, valueList := range attrsMap {
-		var values []string
-		diags := valueList.ElementsAs(ctx, &values, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		attrs[key] = values
-	}
-}
-
 // Create creates a new LDAP entry with the specified DN and attributes.
 // Has special encoding support for Active Directory's unicodePwd attribute.
 func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -158,9 +136,9 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// LDAP Request Attributes
 	attributes := make(map[string][]string)
 
-	r.tfMapToLDAPAttrs(ctx, resp, &plan.Attributes, attributes)
+	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
 	if !config.AttributesWO.IsNull() {
-		r.tfMapToLDAPAttrs(ctx, resp, &config.AttributesWO, attributes)
+		tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
 	}
 
 	// Special handling for unicodePwd attribute (Active Directory)
@@ -296,121 +274,67 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan LdapEntryResourceModel
-	var configData LdapEntryResourceModel
+	var config LdapEntryResourceModel
+	var state LdapEntryResourceModel
 
-	// Read Terraform plan plan into the model
+	// Retrieve values from plan
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Read config for write-only attributes
-	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
-
+	// Retrieve values from config (write-only attributes)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Get current state for comparison
-	var currentData LdapEntryResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &currentData)...)
+	// Retrieve values from state
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Convert new attributes from Map to map[string][]string
-	newAttrsMap := make(map[string][]string)
-	attrsMap := make(map[string]types.List)
-	diags := plan.Attributes.ElementsAs(ctx, &attrsMap, false)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
+	attributes := make(map[string][]string)
+	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
 
-	for key, valueList := range attrsMap {
-		var values []string
-		diags := valueList.ElementsAs(ctx, &values, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		newAttrsMap[key] = values
-	}
+	versionChanged := !plan.AttributesWOVer.Equal(state.AttributesWOVer)
 
-	// Check if attributes_wo_version has changed
-	versionChanged := !plan.AttributesWOVer.Equal(currentData.AttributesWOVer)
+	// Convert write-only attributes from config only if version changed
+	if versionChanged && !config.AttributesWO.IsNull() {
+		tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &config.Attributes, attributes)
 
-	// Convert write-only attributes from config (not plan) only if version changed
-	if versionChanged && !configData.AttributesWO.IsNull() {
-		attrsWOMap := make(map[string]types.List)
-		diags := configData.AttributesWO.ElementsAs(ctx, &attrsWOMap, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+		// Special handling for unicodePwd attribute (Active Directory)
+		if value, ok := attributes["unicodePwd"]; ok {
+			encoded, err := encodeUnicodePwd(value[0])
 
-		for key, valueList := range attrsWOMap {
-			var values []string
-			diags := valueList.ElementsAs(ctx, &values, false)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
+			if err != nil {
+				resp.Diagnostics.AddError("Error encoding unicodePwd", fmt.Sprintf("Unable to encode unicodePwd value: %s", err))
 				return
 			}
 
-			// Special handling for unicodePwd attribute (Active Directory)
-			if strings.EqualFold(key, "unicodePwd") {
-				encodedValues := make([]string, len(values))
-				for i, val := range values {
-					encoded, err := encodeUnicodePwd(val)
-					if err != nil {
-						resp.Diagnostics.AddError(
-							"Error encoding unicodePwd",
-							fmt.Sprintf("Unable to encode unicodePwd value: %s", err),
-						)
-						return
-					}
-					encodedValues[i] = encoded
-				}
-				newAttrsMap[key] = encodedValues
-			} else {
-				newAttrsMap[key] = values
-			}
+			attributes["unicodePwd"] = []string{encoded}
 		}
 	}
 
-	// Get current attributes for comparison
-	currentAttrsMap := make(map[string][]string)
-	currentAttrsMapTF := make(map[string]types.List)
-	diags = currentData.Attributes.ElementsAs(ctx, &currentAttrsMapTF, false)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	for key, valueList := range currentAttrsMapTF {
-		var values []string
-		diags := valueList.ElementsAs(ctx, &values, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		currentAttrsMap[key] = values
-	}
+	// Get attributes from state for comparisons
+	// Needed to build up LDAP replace and delete ops
+	currentAttrs := make(map[string][]string)
+	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &state.Attributes, currentAttrs)
 
 	// Create LDAP modify request
 	modifyReq := ldap.NewModifyRequest(plan.DN.ValueString(), nil)
 
-	// Update attributes (including objectClass)
-	for key, newValues := range newAttrsMap {
-		if currentValues, exists := currentAttrsMap[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
+	// Update changed attributes
+	for key, newValues := range attributes {
+		if currentValues, exists := currentAttrs[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
 			modifyReq.Replace(key, newValues)
 		}
 	}
 
 	// Remove attributes that are no longer present
-	for key := range currentAttrsMap {
-		if _, exists := newAttrsMap[key]; !exists {
+	for key := range currentAttrs {
+		if _, exists := attributes[key]; !exists {
 			modifyReq.Delete(key, nil)
 		}
 	}
@@ -427,7 +351,6 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 	}
 
-	// Set ID to DN
 	plan.Id = plan.DN
 
 	// Save updated plan into Terraform state
@@ -437,17 +360,13 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 func (r *LdapEntryResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var data LdapEntryResourceModel
 
-	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Create LDAP delete request
 	delReq := ldap.NewDelRequest(data.DN.ValueString(), nil)
 
-	// Execute LDAP delete operation
 	err := r.client.Del(delReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -607,4 +526,28 @@ func encodeUnicodePwd(password string) (string, error) {
 		return "", err
 	}
 	return pwdEncoded, nil
+}
+
+// tfMapToLDAPAttrs converts a Terraform Map type to LDAP attribute format (map[string][]string).
+// It extracts the map elements and populates the attrs parameter with the converted values.
+func tfMapToLDAPAttrs(ctx context.Context, diag *diag.Diagnostics, tfMap *types.Map, attrs map[string][]string) {
+	attrsMap := make(map[string]types.List)
+
+	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
+	diag.Append(diags...)
+	if diag.HasError() {
+		return
+	}
+
+	for key, valueList := range attrsMap {
+		var values []string
+
+		diags := valueList.ElementsAs(ctx, &values, false)
+		diag.Append(diags...)
+		if diag.HasError() {
+			return
+		}
+
+		attrs[key] = values
+	}
 }
