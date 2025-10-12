@@ -25,28 +25,34 @@ import (
 var _ resource.Resource = &LdapEntryResource{}
 var _ resource.ResourceWithImportState = &LdapEntryResource{}
 
+// NewLdapEntryResource creates a new instance of the LDAP entry resource.
 func NewLdapEntryResource() resource.Resource {
 	return &LdapEntryResource{}
 }
 
-// LdapEntryResource defines the resource implementation.
+// LdapEntryResource defines the resource implementation for managing LDAP entries.
+// It maintains a connection to the LDAP server and provides CRUD operations.
 type LdapEntryResource struct {
 	client *ldap.Conn
 }
 
-// LdapEntryResourceModel describes the resource data model.
+// LdapEntryResourceModel describes the resource data model for LDAP entries.
+// It maps the Terraform schema to Go types for state management.
 type LdapEntryResourceModel struct {
-	DN              types.String `tfsdk:"dn"`
-	Attributes      types.Map    `tfsdk:"attributes"`            // Map of List[String]
-	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of List[String] - write-only
-	AttributesWOVer types.Int64  `tfsdk:"attributes_wo_version"` // Version trigger for attributes_wo
-	Id              types.String `tfsdk:"id"`
+	DN              types.String `tfsdk:"dn"`                    // Distinguished Name - unique identifier for the LDAP entry
+	Attributes      types.Map    `tfsdk:"attributes"`            // Map of List[String] - regular LDAP attributes stored in state
+	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of List[String] - write-only sensitive attributes (not stored in state)
+	AttributesWOVer types.Int64  `tfsdk:"attributes_wo_version"` // Version trigger for attributes_wo changes
+	Id              types.String `tfsdk:"id"`                    // Resource identifier (same as DN)
 }
 
+// Metadata sets the resource type name for the LDAP entry resource.
 func (r *LdapEntryResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_entry"
 }
 
+// Schema defines the schema for the LDAP entry resource, including attributes for DN,
+// regular attributes, write-only attributes, and versioning for write-only changes.
 func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains object classes and attributes.",
@@ -88,6 +94,7 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 	}
 }
 
+// Configure initializes the resource with the LDAP client connection from the provider.
 func (r *LdapEntryResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	// Prevent panic if the provider has not been configured.
 	if req.ProviderData == nil {
@@ -108,28 +115,12 @@ func (r *LdapEntryResource) Configure(ctx context.Context, req resource.Configur
 	r.client = client
 }
 
-func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data LdapEntryResourceModel
-	var configData LdapEntryResourceModel
-
-	// Read Terraform plan data into the model
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Read config for write-only attributes
-	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
-
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Convert attributes from Map to map[string][]string
-	attributes := make(map[string][]string)
+// tfMapToLDAPAttrs converts a Terraform Map type to LDAP attribute format (map[string][]string).
+// It extracts the map elements and populates the attrs parameter with the converted values.
+func (r *LdapEntryResource) tfMapToLDAPAttrs(ctx context.Context, resp *resource.CreateResponse, tfMap *types.Map, attrs map[string][]string) {
 	attrsMap := make(map[string]types.List)
-	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+
+	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -142,49 +133,50 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		attributes[key] = values
+		attrs[key] = values
+	}
+}
+
+// Create creates a new LDAP entry with the specified DN and attributes.
+// Has special encoding support for Active Directory's unicodePwd attribute.
+func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan LdapEntryResourceModel
+	var config LdapEntryResourceModel
+
+	// Retrieve values from plan
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// Convert write-only attributes from config (not plan)
-	if !configData.AttributesWO.IsNull() {
-		attrsWOMap := make(map[string]types.List)
-		diags := configData.AttributesWO.ElementsAs(ctx, &attrsWOMap, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
+	// Retrieve values from config (for write-only attributes)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// LDAP Request Attributes
+	attributes := make(map[string][]string)
+
+	r.tfMapToLDAPAttrs(ctx, resp, &plan.Attributes, attributes)
+	if !config.AttributesWO.IsNull() {
+		r.tfMapToLDAPAttrs(ctx, resp, &config.AttributesWO, attributes)
+	}
+
+	// Special handling for unicodePwd attribute (Active Directory)
+	if value, ok := attributes["unicodePwd"]; ok {
+		encoded, err := encodeUnicodePwd(value[0])
+
+		if err != nil {
+			resp.Diagnostics.AddError("Error encoding unicodePwd", fmt.Sprintf("Unable to encode unicodePwd value: %s", err))
 			return
 		}
 
-		for key, valueList := range attrsWOMap {
-			var values []string
-			diags := valueList.ElementsAs(ctx, &values, false)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-
-			// Special handling for unicodePwd attribute (Active Directory)
-			if strings.EqualFold(key, "unicodePwd") {
-				encodedValues := make([]string, len(values))
-				for i, val := range values {
-					encoded, err := encodeUnicodePwd(val)
-					if err != nil {
-						resp.Diagnostics.AddError(
-							"Error encoding unicodePwd",
-							fmt.Sprintf("Unable to encode unicodePwd value: %s", err),
-						)
-						return
-					}
-					encodedValues[i] = encoded
-				}
-				attributes[key] = encodedValues
-			} else {
-				attributes[key] = values
-			}
-		}
+		attributes["unicodePwd"] = []string{encoded}
 	}
 
 	// Create LDAP add request
-	addReq := ldap.NewAddRequest(data.DN.ValueString(), nil)
+	addReq := ldap.NewAddRequest(plan.DN.ValueString(), nil)
 	for attr, values := range attributes {
 		addReq.Attribute(attr, values)
 	}
@@ -194,20 +186,16 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating LDAP entry",
-			fmt.Sprintf("Unable to create LDAP entry %s: %s", data.DN.ValueString(), err),
+			fmt.Sprintf("Unable to create LDAP entry %s: %s", plan.DN.ValueString(), err),
 		)
 		return
 	}
+	tflog.Trace(ctx, fmt.Sprintf("created an LDAP entry: %s", plan.Id))
 
-	// Set ID to DN
-	data.Id = data.DN
+	plan.Id = plan.DN
 
-	// Write logs using the tflog package
-	// Documentation: https://terraform.io/plugin/log
-	tflog.Trace(ctx, fmt.Sprintf("created an LDAP entry: %s", data.Id))
-
-	// Save data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Save plan into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -307,11 +295,11 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 }
 
 func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data LdapEntryResourceModel
+	var plan LdapEntryResourceModel
 	var configData LdapEntryResourceModel
 
-	// Read Terraform plan data into the model
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	// Read Terraform plan plan into the model
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -334,7 +322,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// Convert new attributes from Map to map[string][]string
 	newAttrsMap := make(map[string][]string)
 	attrsMap := make(map[string]types.List)
-	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+	diags := plan.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -351,7 +339,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	// Check if attributes_wo_version has changed
-	versionChanged := !data.AttributesWOVer.Equal(currentData.AttributesWOVer)
+	versionChanged := !plan.AttributesWOVer.Equal(currentData.AttributesWOVer)
 
 	// Convert write-only attributes from config (not plan) only if version changed
 	if versionChanged && !configData.AttributesWO.IsNull() {
@@ -411,7 +399,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	// Create LDAP modify request
-	modifyReq := ldap.NewModifyRequest(data.DN.ValueString(), nil)
+	modifyReq := ldap.NewModifyRequest(plan.DN.ValueString(), nil)
 
 	// Update attributes (including objectClass)
 	for key, newValues := range newAttrsMap {
@@ -433,17 +421,17 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error updating LDAP entry",
-				fmt.Sprintf("Unable to update LDAP entry %s: %s", data.DN.ValueString(), err),
+				fmt.Sprintf("Unable to update LDAP entry %s: %s", plan.DN.ValueString(), err),
 			)
 			return
 		}
 	}
 
 	// Set ID to DN
-	data.Id = data.DN
+	plan.Id = plan.DN
 
-	// Save updated data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	// Save updated plan into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *LdapEntryResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
