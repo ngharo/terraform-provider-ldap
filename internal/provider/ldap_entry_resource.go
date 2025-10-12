@@ -177,11 +177,10 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 }
 
 func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data LdapEntryResourceModel
+	var state LdapEntryResourceModel
 
-	// Read Terraform prior state data into the model
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-
+	// Read Terraform prior state state into the model
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -191,7 +190,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	var attributesToRequest []string
 
 	var attrsMap map[string]types.List
-	diags := data.Attributes.ElementsAs(ctx, &attrsMap, false)
+	diags := state.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -200,9 +199,9 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		attributesToRequest = append(attributesToRequest, attrName)
 	}
 
-	// During import, state is empty, check if import specified which attributes to fetch
+	// During import, state is empty, and we don't have access to the config
+	// Check if import specified which attributes to fetch via private state
 	if len(attributesToRequest) == 0 {
-		// Check private state for import attributes
 		privateData, diags := req.Private.GetKey(ctx, "import_attributes")
 		resp.Diagnostics.Append(diags...)
 
@@ -223,7 +222,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	// Search for the LDAP entry - only request managed attributes
 	searchReq := ldap.NewSearchRequest(
-		data.DN.ValueString(),
+		state.DN.ValueString(),
 		ldap.ScopeBaseObject,
 		ldap.NeverDerefAliases,
 		0,
@@ -238,7 +237,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading LDAP entry",
-			fmt.Sprintf("Unable to read LDAP entry %s: %s", data.DN.ValueString(), err),
+			fmt.Sprintf("Unable to read LDAP entry %s: %s", state.DN.ValueString(), err),
 		)
 		return
 	}
@@ -263,13 +262,11 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	data.Attributes = attributesMap
 
-	// Set ID to DN
-	data.Id = data.DN
+	state.Attributes = attributesMap
+	state.Id = state.DN
 
-	// Save updated data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -385,14 +382,12 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 	var dn string
 	var attributesToImport []string
 
-	// Try to parse as JSON first
 	var importSpec struct {
 		DN         string   `json:"dn"`
 		Attributes []string `json:"attributes"`
 	}
 
 	if err := json.Unmarshal([]byte(req.ID), &importSpec); err == nil {
-		// Successfully parsed as JSON
 		dn = importSpec.DN
 		attributesToImport = importSpec.Attributes
 	} else {
@@ -407,6 +402,7 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 	// Store the attributes to import in private state so Read can use them
 	if len(attributesToImport) > 0 {
 		privateData, err := json.Marshal(map[string][]string{"import_attributes": attributesToImport})
+
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error encoding import attributes",
@@ -414,6 +410,7 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 			)
 			return
 		}
+
 		resp.Private.SetKey(ctx, "import_attributes", privateData)
 	}
 }
