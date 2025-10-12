@@ -25,13 +25,11 @@ import (
 var _ resource.Resource = &LdapEntryResource{}
 var _ resource.ResourceWithImportState = &LdapEntryResource{}
 
-// NewLdapEntryResource creates a new instance of the LDAP entry resource.
 func NewLdapEntryResource() resource.Resource {
 	return &LdapEntryResource{}
 }
 
 // LdapEntryResource defines the resource implementation for managing LDAP entries.
-// It maintains a connection to the LDAP server and provides CRUD operations.
 type LdapEntryResource struct {
 	client *ldap.Conn
 }
@@ -51,8 +49,7 @@ func (r *LdapEntryResource) Metadata(ctx context.Context, req resource.MetadataR
 	resp.TypeName = req.ProviderTypeName + "_entry"
 }
 
-// Schema defines the schema for the LDAP entry resource, including attributes for DN,
-// regular attributes, write-only attributes, and versioning for write-only changes.
+// Schema defines the schema for the LDAP entry resource.
 func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains object classes and attributes.",
@@ -136,9 +133,9 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// LDAP Request Attributes
 	attributes := make(map[string][]string)
 
-	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
+	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
 	if !config.AttributesWO.IsNull() {
-		tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
+		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
 	}
 
 	// Special handling for unicodePwd attribute (Active Directory)
@@ -293,13 +290,13 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	attributes := make(map[string][]string)
-	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
+	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
 
 	versionChanged := !plan.AttributesWOVer.Equal(state.AttributesWOVer)
 
 	// Convert write-only attributes from config only if version changed
 	if versionChanged && !config.AttributesWO.IsNull() {
-		tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &config.Attributes, attributes)
+		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.Attributes, attributes)
 
 		// Special handling for unicodePwd attribute (Active Directory)
 		if value, ok := attributes["unicodePwd"]; ok {
@@ -317,7 +314,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// Get attributes from state for comparisons
 	// Needed to build up LDAP replace and delete ops
 	currentAttrs := make(map[string][]string)
-	tfMapToLDAPAttrs(ctx, &resp.Diagnostics, &state.Attributes, currentAttrs)
+	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &state.Attributes, currentAttrs)
 
 	// Create LDAP modify request
 	modifyReq := ldap.NewModifyRequest(plan.DN.ValueString(), nil)
@@ -514,7 +511,7 @@ func stringSlicesEqual(a, b []string) bool {
 }
 
 // encodeUnicodePwd encodes a password for Active Directory's unicodePwd attribute.
-// The password must be enclosed in double quotes and encoded as UTF-16LE.
+// return value is double quoted and encoded as UTF-16LE.
 // See: https://ldapwiki.com/wiki/Wiki.jsp?page=UnicodePwd
 func encodeUnicodePwd(password string) (string, error) {
 	utf16 := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
@@ -525,9 +522,8 @@ func encodeUnicodePwd(password string) (string, error) {
 	return pwdEncoded, nil
 }
 
-// tfMapToLDAPAttrs converts a Terraform Map type to LDAP attribute format (map[string][]string).
-// It extracts the map elements and populates the attrs parameter with the converted values.
-func tfMapToLDAPAttrs(ctx context.Context, diag *diag.Diagnostics, tfMap *types.Map, attrs map[string][]string) {
+// unmarshalTerraformAttributes converts a Terraform Map type to map[string][]string.
+func unmarshalTerraformAttributes(ctx context.Context, diag *diag.Diagnostics, tfMap *types.Map, attrs map[string][]string) {
 	attrsMap := make(map[string]types.List)
 
 	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
