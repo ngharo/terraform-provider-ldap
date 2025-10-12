@@ -35,8 +35,7 @@ func TestAccLdapSearchDataSource_Basic(t *testing.T) {
 func testAccLdapSearchDataSourceConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

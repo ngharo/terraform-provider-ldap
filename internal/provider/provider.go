@@ -5,7 +5,10 @@ package provider
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/go-ldap/ldap/v3"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -32,11 +35,10 @@ type LdapProvider struct {
 
 // LdapProviderModel describes the provider data model.
 type LdapProviderModel struct {
-	Host   types.String `tfsdk:"host"`
-	Port   types.Int64  `tfsdk:"port"`
-	BindDN types.String `tfsdk:"bind_dn"`
-	BindPW types.String `tfsdk:"bind_password"`
-	UseTLS types.Bool   `tfsdk:"use_tls"`
+	URL      types.String `tfsdk:"url"`
+	BindDN   types.String `tfsdk:"bind_dn"`
+	BindPW   types.String `tfsdk:"bind_password"`
+	Insecure types.Bool   `tfsdk:"insecure"`
 }
 
 func (p *LdapProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -48,13 +50,9 @@ func (p *LdapProvider) Schema(ctx context.Context, req provider.SchemaRequest, r
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "The LDAP provider is used to interact with LDAP (Lightweight Directory Access Protocol) servers. It allows you to manage LDAP entries using Terraform.",
 		Attributes: map[string]schema.Attribute{
-			"host": schema.StringAttribute{
-				MarkdownDescription: "LDAP server hostname or IP address. Can also be set via the `LDAP_HOST` environment variable. Defaults to `localhost`.",
-				Optional:            true,
-			},
-			"port": schema.Int64Attribute{
-				MarkdownDescription: "LDAP server port. Can also be set via the `LDAP_PORT` environment variable. Defaults to `389` for LDAP or `636` for LDAPS.",
-				Optional:            true,
+			"url": schema.StringAttribute{
+				MarkdownDescription: "LDAP server URL (e.g., `ldap://localhost:389` or `ldaps://localhost:636`). Can also be set via the `LDAP_URL` environment variable.",
+				Required:            true,
 			},
 			"bind_dn": schema.StringAttribute{
 				MarkdownDescription: "Distinguished name for binding to LDAP server. Can also be set via the `LDAP_BIND_DN` environment variable.",
@@ -65,8 +63,8 @@ func (p *LdapProvider) Schema(ctx context.Context, req provider.SchemaRequest, r
 				Optional:            true,
 				Sensitive:           true,
 			},
-			"use_tls": schema.BoolAttribute{
-				MarkdownDescription: "Use TLS for LDAP connection. Can also be set via the `LDAP_USE_TLS` environment variable. Defaults to `false`.",
+			"insecure": schema.BoolAttribute{
+				MarkdownDescription: "Whether the server should be accessed without verifying the TLS certificate. Can also be set via the `LDAP_INSECURE` environment variable. Defaults to `false`.",
 				Optional:            true,
 			},
 		},
@@ -82,18 +80,31 @@ func (p *LdapProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
-	// Set default values
-	host := "localhost"
-	port := int64(389)
+	// Set values with precedence: config > environment variable
+	ldapURL := ""
 	bindDN := ""
 	bindPW := ""
-	useTLS := false
+	insecure := false
 
-	if !data.Host.IsNull() {
-		host = data.Host.ValueString()
+	// Check environment variables first
+	if envURL := os.Getenv("LDAP_URL"); envURL != "" {
+		ldapURL = envURL
 	}
-	if !data.Port.IsNull() {
-		port = data.Port.ValueInt64()
+	if envBindDN := os.Getenv("LDAP_BIND_DN"); envBindDN != "" {
+		bindDN = envBindDN
+	}
+	if envBindPW := os.Getenv("LDAP_BIND_PASSWORD"); envBindPW != "" {
+		bindPW = envBindPW
+	}
+	if envInsecure := os.Getenv("LDAP_INSECURE"); envInsecure != "" {
+		if val, err := strconv.ParseBool(envInsecure); err == nil {
+			insecure = val
+		}
+	}
+
+	// Override with config values if provided
+	if !data.URL.IsNull() {
+		ldapURL = data.URL.ValueString()
 	}
 	if !data.BindDN.IsNull() {
 		bindDN = data.BindDN.ValueString()
@@ -101,24 +112,19 @@ func (p *LdapProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	if !data.BindPW.IsNull() {
 		bindPW = data.BindPW.ValueString()
 	}
-	if !data.UseTLS.IsNull() {
-		useTLS = data.UseTLS.ValueBool()
+	if !data.Insecure.IsNull() {
+		insecure = data.Insecure.ValueBool()
 	}
 
-	// Create LDAP connection
-	var conn *ldap.Conn
-	var err error
-
-	if useTLS {
-		conn, err = ldap.DialURL(fmt.Sprintf("ldaps://%s:%d", host, port))
-	} else {
-		conn, err = ldap.DialURL(fmt.Sprintf("ldap://%s:%d", host, port))
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: insecure,
 	}
 
+	conn, err := ldap.DialURL(ldapURL, ldap.DialWithTLSConfig(tlsConfig))
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to connect to LDAP server",
-			fmt.Sprintf("Error connecting to LDAP server %s:%d: %s", host, port, err),
+			fmt.Sprintf("Error connecting to LDAP server at %s: %s", ldapURL, err),
 		)
 		return
 	}

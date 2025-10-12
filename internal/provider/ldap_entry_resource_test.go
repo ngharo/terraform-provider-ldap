@@ -44,7 +44,7 @@ func TestAccLdapEntryResource(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"attributes"},
 			},
-			// Update and Read testing
+			// Update and Read testing - add attributes
 			{
 				Config: testAccLdapEntryResourceConfigUpdated("cn=test,dc=example,dc=com"),
 				ConfigStateChecks: []statecheck.StateCheck{
@@ -60,6 +60,17 @@ func TestAccLdapEntryResource(t *testing.T) {
 					),
 				},
 			},
+			// Update and Read testing - remove attributes
+			{
+				Config: testAccLdapEntryResourceConfigAttributeRemoval("cn=test,dc=example,dc=com"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("cn=test,dc=example,dc=com"),
+					),
+				},
+			},
 			// Delete testing automatically occurs in TestCase
 		},
 	})
@@ -68,8 +79,7 @@ func TestAccLdapEntryResource(t *testing.T) {
 func testAccLdapEntryResourceConfig(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -89,8 +99,7 @@ resource "ldap_entry" "test" {
 func testAccLdapEntryResourceConfigUpdated(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -103,6 +112,27 @@ resource "ldap_entry" "test" {
     sn = ["user"]
     mail = ["test.updated@example.com"]
     description = ["Updated user"]
+  }
+}
+`, dn)
+}
+
+func testAccLdapEntryResourceConfigAttributeRemoval(dn string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = "ldap://localhost:3389"
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test" {
+  dn = %[1]q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn = ["test"]
+    sn = ["user"]
+    mail = ["test.updated@example.com"]
+    # description attribute removed
   }
 }
 `, dn)
