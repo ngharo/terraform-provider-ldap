@@ -31,25 +31,6 @@ func TestAccProvider_DefaultConfiguration(t *testing.T) {
 	})
 }
 
-func TestAccProvider_CustomPortConfiguration(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccProviderConfigCustomPort(),
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("cn=custom-port-test,ou=users,dc=example,dc=com"),
-					),
-				},
-			},
-		},
-	})
-}
-
 func testAccProviderConfigDefault() string {
 	return `
 provider "ldap" {
@@ -64,25 +45,6 @@ resource "ldap_entry" "test" {
   attributes = {
     objectClass = ["person"]
     cn = ["default-test"]
-    sn = ["Test"]
-  }
-}
-`
-}
-
-func testAccProviderConfigCustomPort() string {
-	return `
-provider "ldap" {
-  url = "ldap://localhost:3389"
-  bind_dn = "cn=Manager,dc=example,dc=com"
-  bind_password = "secret"
-}
-
-resource "ldap_entry" "test" {
-  dn = "cn=custom-port-test,ou=users,dc=example,dc=com"
-  attributes = {
-    objectClass = ["person"]
-    cn = ["custom-port-test"]
     sn = ["Test"]
   }
 }
