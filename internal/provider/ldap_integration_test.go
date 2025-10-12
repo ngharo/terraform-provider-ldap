@@ -168,8 +168,7 @@ func TestAccLdapIntegration_ComplexFilters(t *testing.T) {
 func testAccLdapIntegrationEntryConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -203,8 +202,7 @@ resource "ldap_entry" "group" {
 func testAccLdapIntegrationConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -235,8 +233,7 @@ data "ldap_search" "group_members" {
 func testAccLdapIntegrationSearchScopesEntryConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -257,8 +254,7 @@ resource "ldap_entry" "user" {
 func testAccLdapIntegrationSearchScopesConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -289,8 +285,7 @@ data "ldap_search" "subtree_search" {
 func testAccLdapIntegrationComplexFiltersEntryConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -322,8 +317,7 @@ resource "ldap_entry" "group" {
 func testAccLdapIntegrationComplexFiltersConfig() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

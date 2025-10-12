@@ -81,8 +81,7 @@ func TestAccLdapEntryResource_WriteOnlyAttributes(t *testing.T) {
 func testAccLdapEntryResourceConfigWithWriteOnly(dn, password string, version int) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -105,8 +104,7 @@ resource "ldap_entry" "test_writeonly" {
 func testAccLdapEntryResourceConfigWithWriteOnlyAndRegularUpdate(dn, password string, version int) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

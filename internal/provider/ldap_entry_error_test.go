@@ -59,8 +59,7 @@ func TestAccLdapEntryResource_DuplicateEntry(t *testing.T) {
 func testAccLdapEntryResourceConfigInvalidDN() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -79,8 +78,7 @@ resource "ldap_entry" "invalid" {
 func testAccLdapEntryResourceConfigMissingRequired() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -99,8 +97,7 @@ resource "ldap_entry" "missing_required" {
 func testAccLdapEntryResourceConfigDuplicate(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -119,8 +116,7 @@ resource "ldap_entry" "original" {
 func testAccLdapEntryResourceConfigDuplicateConflict(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

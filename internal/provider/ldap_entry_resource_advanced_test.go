@@ -91,8 +91,7 @@ func TestAccLdapEntryResource_MinimalAttributes(t *testing.T) {
 func testAccLdapEntryResourceConfigInetOrgPerson(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -117,8 +116,7 @@ resource "ldap_entry" "inetorg_user" {
 func testAccLdapEntryResourceConfigGroup(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -138,8 +136,7 @@ resource "ldap_entry" "test_group" {
 func testAccLdapEntryResourceConfigMinimal(dn string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

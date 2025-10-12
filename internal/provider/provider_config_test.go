@@ -53,8 +53,8 @@ func TestAccProvider_CustomPortConfiguration(t *testing.T) {
 func testAccProviderConfigDefault() string {
 	return `
 provider "ldap" {
-  # Using default host (localhost) and explicit settings
-  port = 3389
+  # Using default URL
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }
@@ -73,8 +73,7 @@ resource "ldap_entry" "test" {
 func testAccProviderConfigCustomPort() string {
 	return `
 provider "ldap" {
-  host = "localhost"
-  port = 3389
+  url = "ldap://localhost:3389"
   bind_dn = "cn=Manager,dc=example,dc=com"
   bind_password = "secret"
 }

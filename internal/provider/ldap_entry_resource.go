@@ -296,7 +296,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 
 	// Convert write-only attributes from config only if version changed
 	if versionChanged && !config.AttributesWO.IsNull() {
-		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.Attributes, attributes)
+		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
 
 		// Special handling for unicodePwd attribute (Active Directory)
 		if value, ok := attributes["unicodePwd"]; ok {
