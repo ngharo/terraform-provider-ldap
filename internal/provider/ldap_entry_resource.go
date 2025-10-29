@@ -153,7 +153,10 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// Create LDAP add request
 	addReq := ldap.NewAddRequest(plan.DN.ValueString(), nil)
 	for attr, values := range attributes {
-		addReq.Attribute(attr, values)
+		// Skip attributes with empty values - LDAP servers reject empty attributes during creation
+		if len(values) > 0 {
+			addReq.Attribute(attr, values)
+		}
 	}
 
 	// Execute LDAP add operation

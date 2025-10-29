@@ -155,6 +155,31 @@ func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckLdapEntryDestroy,
 		Steps: []resource.TestStep{
+			// Step 1: Create a user with empty mail
+			{
+				Config: testAccLdapEntryResourceConfigEmptyAttribute(``),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
+					),
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(0),
+					),
+				},
+			},
+		},
+	})
+}
+func TestAccLdapEntryResource_EmptyAttributesTransition(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
 			// Step 1: Create a user with two mails
 			{
 				Config: testAccLdapEntryResourceConfigEmptyAttribute(`"foo@example.com", "bar@example.com"`),
