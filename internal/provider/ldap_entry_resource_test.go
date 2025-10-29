@@ -171,6 +171,38 @@ func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
 					),
 				},
 			},
+			// Step 2: Externally add mail attribute, then apply to bring it back to desired state
+			{
+				PreConfig: func() {
+					// Simulate external modification by adding mail attribute directly to LDAP
+					conn, err := ldap.DialURL("ldap://localhost:3389")
+					if err != nil {
+						t.Fatalf("failed to connect to LDAP server: %v", err)
+					}
+					defer conn.Close()
+
+					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
+					if err != nil {
+						t.Fatalf("failed to bind to LDAP server: %v", err)
+					}
+
+					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
+					modifyReq.Add("mail", []string{"external@example.com"})
+					err = conn.Modify(modifyReq)
+					if err != nil {
+						t.Fatalf("failed to add mail attribute: %v", err)
+					}
+				},
+				Config: testAccLdapEntryResourceConfigEmptyAttribute(``),
+				ConfigStateChecks: []statecheck.StateCheck{
+					// Verify that after apply, mail is back to empty (desired state enforced)
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(0),
+					),
+				},
+			},
 		},
 	})
 }
