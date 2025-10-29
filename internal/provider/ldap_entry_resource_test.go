@@ -138,6 +138,85 @@ resource "ldap_entry" "test" {
 `, dn)
 }
 
+func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
+			// Step 1: Create a user with two mails
+			{
+				Config: testAccLdapEntryResourceConfigEmptyAttribute(`"foo@example.com", "bar@example.com"`),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
+					),
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(2),
+					),
+				},
+			},
+			// Step 2: Update user to one mail
+			{
+				Config: testAccLdapEntryResourceConfigEmptyAttribute(`"foo@example.com"`),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
+					),
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(1),
+					),
+				},
+			},
+			// Step 3: Update user to no mail
+			{
+				Config: testAccLdapEntryResourceConfigEmptyAttribute(""),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
+					),
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(0),
+					),
+				},
+			},
+		},
+	})
+}
+
+func testAccLdapEntryResourceConfigEmptyAttribute(mails string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = "ldap://localhost:3389"
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test_user" {
+  dn = "uid=testuser,dc=example,dc=com"
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn = ["Test User"]
+    sn = ["User"]
+    uid = ["testuser"]
+		mail = [%s]
+  }
+}
+`, mails)
+}
+
 func testAccCheckLdapEntryDestroy(s *terraform.State) error {
 	// Create LDAP connection to verify entries are destroyed
 	conn, err := ldap.DialURL("ldap://localhost:3389")

@@ -254,6 +254,14 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		readAttrsMap[attr.Name] = attr.Values
 	}
 
+	// Preserve attributes from state that are not returned by LDAP as empty lists
+	// This handles the case where an attribute was set to [] in config (removed from LDAP)
+	for _, attrName := range attributesToRequest {
+		if _, exists := readAttrsMap[attrName]; !exists {
+			readAttrsMap[attrName] = []string{}
+		}
+	}
+
 	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, readAttrsMap)
 	resp.Diagnostics.Append(attrsDiags...)
 	if resp.Diagnostics.HasError() {
@@ -322,7 +330,13 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// Update changed attributes
 	for key, newValues := range attributes {
 		if currentValues, exists := currentAttrs[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
-			modifyReq.Replace(key, newValues)
+			if len(newValues) == 0 {
+				// Delete attribute when set to empty list
+				// Active Directory and some LDAP servers reject Replace with empty values
+				modifyReq.Delete(key, nil)
+			} else {
+				modifyReq.Replace(key, newValues)
+			}
 		}
 	}
 
