@@ -279,7 +279,7 @@ resource "ldap_entry" "test_user" {
     cn = ["Test User"]
     sn = ["User"]
     uid = ["testuser"]
-		mail = [%s]
+    mail = [%s]
   }
 }
 `, mails)
