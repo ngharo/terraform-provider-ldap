@@ -58,6 +58,11 @@ func TestAccLdapEntryResource(t *testing.T) {
 						tfjsonpath.New("id"),
 						knownvalue.StringExact("cn=test,dc=example,dc=com"),
 					),
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("attributes"),
+						knownvalue.MapSizeExact(5),
+					),
 				},
 			},
 			// Update and Read testing - remove attributes
@@ -68,6 +73,12 @@ func TestAccLdapEntryResource(t *testing.T) {
 						"ldap_entry.test",
 						tfjsonpath.New("dn"),
 						knownvalue.StringExact("cn=test,dc=example,dc=com"),
+					),
+					// Ensure description is no longer present in the state
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("attributes"),
+						knownvalue.MapSizeExact(4),
 					),
 				},
 			},
