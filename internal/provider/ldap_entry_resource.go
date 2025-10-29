@@ -133,9 +133,18 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// LDAP Request Attributes
 	attributes := make(map[string][]string)
 
-	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
+	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, attributes)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	if !config.AttributesWO.IsNull() {
-		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
+		diags = unmarshalTerraformAttributes(ctx, &config.AttributesWO, attributes)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// Special handling for unicodePwd attribute (Active Directory)
@@ -153,7 +162,10 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// Create LDAP add request
 	addReq := ldap.NewAddRequest(plan.DN.ValueString(), nil)
 	for attr, values := range attributes {
-		addReq.Attribute(attr, values)
+		// Skip attributes with empty values - LDAP servers reject empty attributes during creation
+		if len(values) > 0 {
+			addReq.Attribute(attr, values)
+		}
 	}
 
 	// Execute LDAP add operation
@@ -254,6 +266,14 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		readAttrsMap[attr.Name] = attr.Values
 	}
 
+	// Preserve attributes from state that are not returned by LDAP as empty lists
+	// This handles the case where an attribute was set to [] in config (removed from LDAP)
+	for _, attrName := range attributesToRequest {
+		if _, exists := readAttrsMap[attrName]; !exists {
+			readAttrsMap[attrName] = []string{}
+		}
+	}
+
 	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, readAttrsMap)
 	resp.Diagnostics.Append(attrsDiags...)
 	if resp.Diagnostics.HasError() {
@@ -290,13 +310,21 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	attributes := make(map[string][]string)
-	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &plan.Attributes, attributes)
+	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, attributes)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	versionChanged := !plan.AttributesWOVer.Equal(state.AttributesWOVer)
 
 	// Convert write-only attributes from config only if version changed
 	if versionChanged && !config.AttributesWO.IsNull() {
-		unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &config.AttributesWO, attributes)
+		diags = unmarshalTerraformAttributes(ctx, &config.AttributesWO, attributes)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 
 		// Special handling for unicodePwd attribute (Active Directory)
 		if value, ok := attributes["unicodePwd"]; ok {
@@ -314,7 +342,11 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// Get attributes from state for comparisons
 	// Needed to build up LDAP replace and delete ops
 	currentAttrs := make(map[string][]string)
-	unmarshalTerraformAttributes(ctx, &resp.Diagnostics, &state.Attributes, currentAttrs)
+	diags = unmarshalTerraformAttributes(ctx, &state.Attributes, currentAttrs)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	// Create LDAP modify request
 	modifyReq := ldap.NewModifyRequest(plan.DN.ValueString(), nil)
@@ -322,7 +354,13 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// Update changed attributes
 	for key, newValues := range attributes {
 		if currentValues, exists := currentAttrs[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
-			modifyReq.Replace(key, newValues)
+			if len(newValues) == 0 {
+				// Delete attribute when set to empty list
+				// Active Directory and some LDAP servers reject Replace with empty values
+				modifyReq.Delete(key, nil)
+			} else {
+				modifyReq.Replace(key, newValues)
+			}
 		}
 	}
 
@@ -523,13 +561,14 @@ func encodeUnicodePwd(password string) (string, error) {
 }
 
 // unmarshalTerraformAttributes converts a Terraform Map type to map[string][]string.
-func unmarshalTerraformAttributes(ctx context.Context, diag *diag.Diagnostics, tfMap *types.Map, attrs map[string][]string) {
+func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs map[string][]string) diag.Diagnostics {
+	var diag diag.Diagnostics
 	attrsMap := make(map[string]types.List)
 
 	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
 	diag.Append(diags...)
 	if diag.HasError() {
-		return
+		return diag
 	}
 
 	for key, valueList := range attrsMap {
@@ -538,9 +577,11 @@ func unmarshalTerraformAttributes(ctx context.Context, diag *diag.Diagnostics, t
 		diags := valueList.ElementsAs(ctx, &values, false)
 		diag.Append(diags...)
 		if diag.HasError() {
-			return
+			return diag
 		}
 
 		attrs[key] = values
 	}
+
+	return diag
 }
