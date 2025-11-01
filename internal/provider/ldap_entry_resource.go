@@ -195,7 +195,8 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 
 	// Build list of attributes to request from LDAP
-	// Only request attributes that are managed in the resource configuration
+	// Request all attributes in the configuration (including null ones for observability)
+	// Null attributes will be read into state as [] or actual values, but never modified
 	var attributesToRequest []string
 
 	var attrsMap map[string]types.List
@@ -486,42 +487,76 @@ func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req p
 		return
 	}
 
-	// Check if all attributes are equal as sets
+	// Check if all managed attributes are equal as sets
+	// Null attributes in config are unmanaged and should not trigger diffs
 	allEqual := true
-	if len(configMap) != len(stateMap) {
-		allEqual = false
-	} else {
-		for key, configList := range configMap {
-			stateList, ok := stateMap[key]
-			if !ok {
-				allEqual = false
-				break
-			}
 
-			var configValues []string
-			var stateValues []string
+	// Compare only managed (non-null) attributes from config
+	// Attributes in state that are null in config or don't exist in config are ignored
+	for key, configList := range configMap {
+		// Skip null attributes - they are unmanaged and should not be compared
+		if configList.IsNull() {
+			continue
+		}
 
-			diags = configList.ElementsAs(ctx, &configValues, false)
-			if diags.HasError() {
-				return
-			}
+		stateList, ok := stateMap[key]
+		if !ok {
+			allEqual = false
+			break
+		}
 
-			diags = stateList.ElementsAs(ctx, &stateValues, false)
-			if diags.HasError() {
-				return
-			}
+		var configValues []string
+		var stateValues []string
 
-			// Use order-independent comparison
-			if !stringSlicesEqual(configValues, stateValues) {
-				allEqual = false
-				break
-			}
+		diags = configList.ElementsAs(ctx, &configValues, false)
+		if diags.HasError() {
+			return
+		}
+
+		diags = stateList.ElementsAs(ctx, &stateValues, false)
+		if diags.HasError() {
+			return
+		}
+
+		// Use order-independent comparison
+		if !stringSlicesEqual(configValues, stateValues) {
+			allEqual = false
+			break
 		}
 	}
 
-	// If all attributes are equal as sets, use state value to prevent spurious diff
+	// If all managed attributes are equal, build a plan value that:
+	// - Uses state values for managed attributes (to preserve order)
+	// - Uses state values for unmanaged (null) attributes in config
+	// - Omits attributes that are in state but not in config
 	if allEqual {
-		resp.PlanValue = req.StateValue
+		planMap := make(map[string]types.List)
+
+		// Only include attributes that are in config
+		// Use state values to preserve order and avoid diffs for null attributes
+		for key, configList := range configMap {
+			if configList.IsNull() {
+				// For null attributes, use state value (could be [] or actual values)
+				if stateList, existsInState := stateMap[key]; existsInState {
+					planMap[key] = stateList
+				}
+			} else {
+				// For managed attributes, use state value if present, otherwise use config
+				if stateList, existsInState := stateMap[key]; existsInState {
+					planMap[key] = stateList
+				} else {
+					planMap[key] = configList
+				}
+			}
+		}
+
+		planValue, planDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, planMap)
+		diags = append(diags, planDiags...)
+		if diags.HasError() {
+			return
+		}
+
+		resp.PlanValue = planValue
 	}
 }
 
@@ -561,6 +596,7 @@ func encodeUnicodePwd(password string) (string, error) {
 }
 
 // unmarshalTerraformAttributes converts a Terraform Map type to map[string][]string.
+// Null values are skipped - they represent unmanaged attributes that should not be modified.
 func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs map[string][]string) diag.Diagnostics {
 	var diag diag.Diagnostics
 	attrsMap := make(map[string]types.List)
@@ -572,6 +608,11 @@ func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs m
 	}
 
 	for key, valueList := range attrsMap {
+		// Skip null attributes - they are unmanaged and should not be modified
+		if valueList.IsNull() {
+			continue
+		}
+
 		var values []string
 
 		diags := valueList.ElementsAs(ctx, &values, false)
