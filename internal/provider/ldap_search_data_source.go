@@ -90,23 +90,7 @@ func (d *LdapSearchDataSource) Schema(ctx context.Context, req datasource.Schema
 }
 
 func (d *LdapSearchDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	// Prevent panic if the provider has not been configured.
-	if req.ProviderData == nil {
-		return
-	}
-
-	conn, ok := req.ProviderData.(*ldap.Conn)
-
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *ldap.Conn, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-
-		return
-	}
-
-	d.conn = conn
+	d.conn = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Data Source")
 }
 
 func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
@@ -119,27 +103,10 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
-	// Set default scope if not provided
+	// sub is default scope
 	scope := "sub"
 	if !data.Scope.IsNull() {
 		scope = data.Scope.ValueString()
-	}
-
-	// Convert scope string to ldap scope constant
-	var ldapScope int
-	switch scope {
-	case "base":
-		ldapScope = ldap.ScopeBaseObject
-	case "one":
-		ldapScope = ldap.ScopeSingleLevel
-	case "sub":
-		ldapScope = ldap.ScopeWholeSubtree
-	default:
-		resp.Diagnostics.AddError(
-			"Invalid Scope",
-			fmt.Sprintf("Scope must be one of 'base', 'one', or 'sub', got: %s", scope),
-		)
-		return
 	}
 
 	// Get requested attributes
@@ -151,73 +118,35 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 	}
 
-	// Perform LDAP search
-	searchRequest := ldap.NewSearchRequest(
-		data.BaseDN.ValueString(),
-		ldapScope,
-		ldap.NeverDerefAliases,
-		0,
-		0,
-		false,
-		data.Filter.ValueString(),
-		attributes,
-		nil,
-	)
-
-	searchResult, err := d.conn.Search(searchRequest)
+	searchResult, err := LdapSearch(d.conn, data.BaseDN.ValueString(), scope, data.Filter.ValueString(), attributes)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"LDAP Search Error",
-			fmt.Sprintf("Unable to perform LDAP search: %s", err),
-		)
+		resp.Diagnostics.AddError("Failed to perform LDAP search", err.Error())
 		return
 	}
 
-	// Convert search results to Terraform types
-	results := make([]LdapSearchResultModel, 0, len(searchResult.Entries))
-	for _, entry := range searchResult.Entries {
-		// Create attributes map
-		attributes := make(map[string][]string)
-		for _, attr := range entry.Attributes {
-			attributes[attr.Name] = attr.Values
-		}
-
-		// Convert attributes to types.Map
-		attributesMap, diags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		result := LdapSearchResultModel{
-			DN:         types.StringValue(entry.DN),
-			Attributes: attributesMap,
-		}
-
-		results = append(results, result)
+	results, err := MarshalLdapResults(ctx, searchResult, attributes)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to convert LDAP search results", err.Error())
+		return
 	}
 
-	// Convert to types.List
 	resultsList, diags := types.ListValueFrom(ctx, types.ObjectType{
 		AttrTypes: map[string]attr.Type{
 			"dn":         types.StringType,
 			"attributes": types.MapType{ElemType: types.ListType{ElemType: types.StringType}},
 		},
 	}, results)
+
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	data.Results = resultsList
-
-	// Set computed scope value
 	data.Scope = types.StringValue(scope)
 
-	// Write logs using the tflog package
 	tflog.Trace(ctx, fmt.Sprintf("performed LDAP search with base DN: %s, scope: %s, filter: %s",
 		data.BaseDN.ValueString(), scope, data.Filter.ValueString()))
 
-	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

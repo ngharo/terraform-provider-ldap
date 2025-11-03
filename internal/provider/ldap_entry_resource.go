@@ -18,7 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"golang.org/x/text/encoding/unicode"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -93,23 +92,7 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 
 // Configure initializes the resource with the LDAP client connection from the provider.
 func (r *LdapEntryResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	// Prevent panic if the provider has not been configured.
-	if req.ProviderData == nil {
-		return
-	}
-
-	client, ok := req.ProviderData.(*ldap.Conn)
-
-	if !ok {
-		resp.Diagnostics.AddError(
-			"Unexpected Resource Configure Type",
-			fmt.Sprintf("Expected *ldap.Conn, got: %T. Please report this issue to the provider developers.", req.ProviderData),
-		)
-
-		return
-	}
-
-	r.client = client
+	r.client = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Resource")
 }
 
 // Create creates a new LDAP entry with the specified DN and attributes.
@@ -148,15 +131,9 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	}
 
 	// Special handling for unicodePwd attribute (Active Directory)
-	if value, ok := attributes["unicodePwd"]; ok {
-		encoded, err := encodeUnicodePwd(value[0])
-
-		if err != nil {
-			resp.Diagnostics.AddError("Error encoding unicodePwd", fmt.Sprintf("Unable to encode unicodePwd value: %s", err))
-			return
-		}
-
-		attributes["unicodePwd"] = []string{encoded}
+	resp.Diagnostics.Append(ProcessUnicodePwd(attributes)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Create LDAP add request
@@ -188,15 +165,11 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state LdapEntryResourceModel
 
-	// Read Terraform prior state state into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Build list of attributes to request from LDAP
-	// Request all attributes in the configuration (including null ones for observability)
-	// Null attributes will be read into state as [] or actual values, but never modified
 	var attributesToRequest []string
 
 	var attrsMap map[string]types.List
@@ -230,20 +203,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		}
 	}
 
-	// Search for the LDAP entry - only request managed attributes
-	searchReq := ldap.NewSearchRequest(
-		state.DN.ValueString(),
-		ldap.ScopeBaseObject,
-		ldap.NeverDerefAliases,
-		0,
-		0,
-		false,
-		"(objectClass=*)",
-		attributesToRequest,
-		nil,
-	)
-
-	sr, err := r.client.Search(searchReq)
+	sr, err := LdapSearch(r.client, state.DN.ValueString(), "base", "(objectClass=*)", attributesToRequest)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading LDAP entry",
@@ -252,36 +212,22 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	// Check if entry exists
-	if len(sr.Entries) == 0 {
+	results, err := MarshalLdapResults(ctx, sr, attributesToRequest)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error marshaling LDAP results",
+			fmt.Sprintf("Unable to marshal LDAP results for %s: %s", state.DN.ValueString(), err),
+		)
+		return
+	}
+	if len(results) == 0 {
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	entry := sr.Entries[0]
+	entry := results[0]
 
-	// Update attributes from LDAP response
-	// Since we only requested managed attributes, we can include all returned attributes
-	readAttrsMap := make(map[string][]string)
-	for _, attr := range entry.Attributes {
-		readAttrsMap[attr.Name] = attr.Values
-	}
-
-	// Preserve attributes from state that are not returned by LDAP as empty lists
-	// This handles the case where an attribute was set to [] in config (removed from LDAP)
-	for _, attrName := range attributesToRequest {
-		if _, exists := readAttrsMap[attrName]; !exists {
-			readAttrsMap[attrName] = []string{}
-		}
-	}
-
-	attributesMap, attrsDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, readAttrsMap)
-	resp.Diagnostics.Append(attrsDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	state.Attributes = attributesMap
+	state.Attributes = entry.Attributes
 	state.Id = state.DN
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -328,15 +274,9 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 
 		// Special handling for unicodePwd attribute (Active Directory)
-		if value, ok := attributes["unicodePwd"]; ok {
-			encoded, err := encodeUnicodePwd(value[0])
-
-			if err != nil {
-				resp.Diagnostics.AddError("Error encoding unicodePwd", fmt.Sprintf("Unable to encode unicodePwd value: %s", err))
-				return
-			}
-
-			attributes["unicodePwd"] = []string{encoded}
+		resp.Diagnostics.Append(ProcessUnicodePwd(attributes)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
 	}
 
@@ -583,18 +523,6 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// encodeUnicodePwd encodes a password for Active Directory's unicodePwd attribute.
-// return value is double quoted and encoded as UTF-16LE.
-// See: https://ldapwiki.com/wiki/Wiki.jsp?page=UnicodePwd
-func encodeUnicodePwd(password string) (string, error) {
-	utf16 := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
-	pwdEncoded, err := utf16.NewEncoder().String(fmt.Sprintf(`"%s"`, password))
-	if err != nil {
-		return "", err
-	}
-	return pwdEncoded, nil
-}
-
 // unmarshalTerraformAttributes converts a Terraform Map type to map[string][]string.
 // Null values are skipped - they represent unmanaged attributes that should not be modified.
 func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs map[string][]string) diag.Diagnostics {
@@ -608,11 +536,7 @@ func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs m
 	}
 
 	for key, valueList := range attrsMap {
-		// Skip null attributes - they are unmanaged and should not be modified
-		if valueList.IsNull() {
-			continue
-		}
-
+		tflog.Trace(ctx, fmt.Sprintf("key: %s | type: %s | isnull: %v", key, valueList.Type(ctx), valueList.IsNull()))
 		var values []string
 
 		diags := valueList.ElementsAs(ctx, &values, false)

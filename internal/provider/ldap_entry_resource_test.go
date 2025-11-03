@@ -220,13 +220,8 @@ func TestAccLdapEntryResource_NullAttributes(t *testing.T) {
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
-					),
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
 						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.Null(),
+						knownvalue.ListSizeExact(0),
 					),
 				},
 			},
@@ -323,6 +318,45 @@ func TestAccLdapEntryResource_NullAttributes(t *testing.T) {
 							knownvalue.StringExact("bar@example.com"),
 							knownvalue.StringExact("external@example.com"),
 						}),
+					),
+				},
+			},
+			// Step 5: Delete attribute externally. Ensure refreshed state value is null
+			{
+				PreConfig: func() {
+					// Simulate external modification by adding mail attribute directly to LDAP
+					conn, err := ldap.DialURL("ldap://localhost:3389")
+					if err != nil {
+						t.Fatalf("failed to connect to LDAP server: %v", err)
+					}
+					defer conn.Close()
+
+					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
+					if err != nil {
+						t.Fatalf("failed to bind to LDAP server: %v", err)
+					}
+
+					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
+					modifyReq.Delete("mail", []string{"external@example.com"})
+					modifyReq.Delete("mail", []string{"foo@example.com"})
+					modifyReq.Delete("mail", []string{"bar@example.com"})
+					err = conn.Modify(modifyReq)
+					if err != nil {
+						t.Fatalf("failed to delete mail attribute: %v", err)
+					}
+				},
+				Config: testAccLdapEntryResourceConfigMailAttribute("null"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					// mail should be rewritten with values from config
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(0),
 					),
 				},
 			},
