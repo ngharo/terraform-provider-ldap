@@ -83,3 +83,21 @@ resource "ldap_entry" "ad_user" {
   # Increment this version to rotate the password
   attributes_wo_version = 1
 }
+
+# Example: Group with null member attribute for external management
+# This creates a group where membership is managed by external systems
+# (e.g., scripts, AD tools, other automation) but Terraform can read the current members
+resource "ldap_entry" "ad_group" {
+  dn = "CN=AppUsers,OU=Groups,DC=example,DC=com"
+  attributes = {
+    objectClass = ["top", "group"]
+    cn          = ["AppUsers"]
+    description = ["Application users - membership managed externally"]
+    member      = null # Not managed by Terraform, but will be read from LDAP
+  }
+}
+
+# Reference the externally-managed member list in outputs or other resources
+output "current_members" {
+  value = ldap_entry.ad_group.attributes.member
+}
