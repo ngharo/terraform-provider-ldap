@@ -29,7 +29,7 @@ func ConvertHumanReadableLDAPScope(scope string) (int, error) {
 	case "sub":
 		ldapScope = ldap.ScopeWholeSubtree
 	default:
-		return -1, fmt.Errorf("Scope must be one of 'base', 'one', or 'sub', got: %s", scope)
+		return -1, fmt.Errorf("scope must be one of 'base', 'one', or 'sub', got: %s", scope)
 	}
 
 	return ldapScope, nil
@@ -56,7 +56,7 @@ func LdapSearch(conn *ldap.Conn, baseDN string, scope string, filter string, att
 	return conn.Search(req)
 }
 
-// Marshals LDAP search results into []LdapEntry
+// Marshals LDAP search results into []LdapEntry.
 func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAttributes []string) ([]LdapEntry, error) {
 	results := make([]LdapEntry, 0, len(sr.Entries))
 
