@@ -221,7 +221,7 @@ func TestAccLdapEntryResource_NullAttributes(t *testing.T) {
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
 						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.ListSizeExact(0),
+						knownvalue.Null(),
 					),
 				},
 			},

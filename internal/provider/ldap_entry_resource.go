@@ -51,7 +51,21 @@ func (r *LdapEntryResource) Metadata(ctx context.Context, req resource.MetadataR
 // Schema defines the schema for the LDAP entry resource.
 func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains object classes and attributes.",
+		MarkdownDescription: `Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains attributes.
+
+## Managing Attributes: Null vs Empty Lists
+The ` + "`ldap_entry`" + ` resource supports three ways to handle LDAP attributes, each with different behavior:
+
+### Managed Attributes (Non-null values)
+When you specify an attribute with a value (including an empty list ` + "`[]`" + `), the provider **actively manages** that attribute.
+
+### Unmanaged Attributes (Null values)
+When you set an attribute to ` + "`null`" + `, the provider **does not manage** that attribute, but it will **read and refresh** the value from the LDAP server.
+
+**Important Limitation:** During resource creation, null attributes appear as ` + "`null`" + ` in state. Actual values from the LDAP server appear after the next ` + "`terraform refresh` or `terraform plan`" + `.
+
+### Omitted Attributes
+When you don't include an attribute in the configuration at all, the provider will **not read or manage** it.`,
 
 		Attributes: map[string]schema.Attribute{
 			"dn": schema.StringAttribute{
@@ -62,7 +76,7 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 				},
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. For single-valued attributes, provide a list with one element. For multi-valued attributes like `member` in groups, provide a list with multiple elements. The `objectClass` attribute is required and defines the schema for the entry.",
+				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. Null values are not managed by Terraform but read from LDAP on refresh. Empty list values will be actively managed by Terraform.",
 				Required:            true,
 				ElementType:         types.ListType{ElemType: types.StringType},
 				PlanModifiers: []planmodifier.Map{
@@ -70,7 +84,7 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 				},
 			},
 			"attributes_wo": schema.MapAttribute{
-				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. The keys are attribute names and values are lists of attribute values. These attributes are never stored in Terraform state and are only used during resource creation and updates. Use this for sensitive data like passwords, API keys, or other secrets. Must be used in conjunction with `attributes_wo_version`. Requires Terraform 1.11 or later. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
+				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. Use this for sensitive data like passwords, API keys, or other secrets. Must be used in conjunction with `attributes_wo_version`. Requires Terraform 1.11 or later. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
 				Optional:            true,
 				WriteOnly:           true,
 				ElementType:         types.ListType{ElemType: types.StringType},
