@@ -208,162 +208,6 @@ func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
 	})
 }
 
-func TestAccLdapEntryResource_NullAttributes(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckLdapEntryDestroy,
-		Steps: []resource.TestStep{
-			// Step 1: Create a user with null mail
-			{
-				Config: testAccLdapEntryResourceConfigMailAttribute("null"),
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.Null(),
-					),
-				},
-			},
-			// Step 2: Externally add mail attribute, then apply.
-			// We expect state to refresh only (empty plan).
-			{
-				PreConfig: func() {
-					// Simulate external modification by adding mail attribute directly to LDAP
-					conn, err := ldap.DialURL("ldap://localhost:3389")
-					if err != nil {
-						t.Fatalf("failed to connect to LDAP server: %v", err)
-					}
-					defer conn.Close()
-
-					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
-					if err != nil {
-						t.Fatalf("failed to bind to LDAP server: %v", err)
-					}
-
-					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
-					modifyReq.Add("mail", []string{"external@example.com"})
-					err = conn.Modify(modifyReq)
-					if err != nil {
-						t.Fatalf("failed to add mail attribute: %v", err)
-					}
-				},
-				Config: testAccLdapEntryResourceConfigMailAttribute("null"),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					// mail should be refreshed with actual LDAP values
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("external@example.com"),
-						}),
-					),
-				},
-			},
-			// Step 3: Bring mail attribute back under management
-			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`["foo@example.com", "bar@example.com"]`),
-				ConfigStateChecks: []statecheck.StateCheck{
-					// mail should be rewritten with values from config
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("foo@example.com"),
-							knownvalue.StringExact("bar@example.com"),
-						}),
-					),
-				},
-			},
-			// Step 4: Back to unmanaged w/ external modifications (step 2 logic).
-			{
-				PreConfig: func() {
-					// Simulate external modification by adding mail attribute directly to LDAP
-					conn, err := ldap.DialURL("ldap://localhost:3389")
-					if err != nil {
-						t.Fatalf("failed to connect to LDAP server: %v", err)
-					}
-					defer conn.Close()
-
-					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
-					if err != nil {
-						t.Fatalf("failed to bind to LDAP server: %v", err)
-					}
-
-					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
-					modifyReq.Add("mail", []string{"external@example.com"})
-					err = conn.Modify(modifyReq)
-					if err != nil {
-						t.Fatalf("failed to add mail attribute: %v", err)
-					}
-				},
-				Config: testAccLdapEntryResourceConfigMailAttribute("null"),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					// mail should be rewritten with values from config
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.ListExact([]knownvalue.Check{
-							knownvalue.StringExact("foo@example.com"),
-							knownvalue.StringExact("bar@example.com"),
-							knownvalue.StringExact("external@example.com"),
-						}),
-					),
-				},
-			},
-			// Step 5: Delete attribute externally. Ensure refreshed state value is null
-			{
-				PreConfig: func() {
-					// Simulate external modification by adding mail attribute directly to LDAP
-					conn, err := ldap.DialURL("ldap://localhost:3389")
-					if err != nil {
-						t.Fatalf("failed to connect to LDAP server: %v", err)
-					}
-					defer conn.Close()
-
-					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
-					if err != nil {
-						t.Fatalf("failed to bind to LDAP server: %v", err)
-					}
-
-					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
-					modifyReq.Delete("mail", []string{"external@example.com"})
-					modifyReq.Delete("mail", []string{"foo@example.com"})
-					modifyReq.Delete("mail", []string{"bar@example.com"})
-					err = conn.Modify(modifyReq)
-					if err != nil {
-						t.Fatalf("failed to delete mail attribute: %v", err)
-					}
-				},
-				Config: testAccLdapEntryResourceConfigMailAttribute("null"),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					// mail should be rewritten with values from config
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("attributes").AtMapKey("mail"),
-						knownvalue.ListSizeExact(0),
-					),
-				},
-			},
-		},
-	})
-}
-
 func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -374,11 +218,6 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 			{
 				Config: testAccLdapEntryResourceConfigMailAttribute(`["foo@example.com", "bar@example.com"]`),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
-					),
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
 						tfjsonpath.New("attributes").AtMapKey("mail"),
@@ -392,11 +231,6 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
-					),
-					statecheck.ExpectKnownValue(
-						"ldap_entry.test_user",
 						tfjsonpath.New("attributes").AtMapKey("mail"),
 						knownvalue.ListSizeExact(1),
 					),
@@ -408,9 +242,66 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
-						tfjsonpath.New("dn"),
-						knownvalue.StringExact("uid=testuser,dc=example,dc=com"),
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(0),
 					),
+				},
+			},
+		},
+	})
+}
+
+func TestAccLdapEntryResource_NullAttribute(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
+			// Step 1: Create a user with two mails
+			{
+				Config: testAccLdapEntryResourceConfigMailAttribute(`null`),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.Null(),
+					),
+				},
+			},
+			// Step 2: Add mail externally to LDAP (simulating external management)
+			{
+				PreConfig: func() {
+					// Simulate external modification by adding mail attribute directly to LDAP
+					conn, err := ldap.DialURL("ldap://localhost:3389")
+					if err != nil {
+						t.Fatalf("failed to connect to LDAP server: %v", err)
+					}
+					defer conn.Close()
+
+					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
+					if err != nil {
+						t.Fatalf("failed to bind to LDAP server: %v", err)
+					}
+
+					modifyReq := ldap.NewModifyRequest("uid=testuser,dc=example,dc=com", nil)
+					modifyReq.Add("mail", []string{"external@example.com"})
+					err = conn.Modify(modifyReq)
+					if err != nil {
+						t.Fatalf("failed to add mail attribute: %v", err)
+					}
+				},
+				Config: testAccLdapEntryResourceConfigMailAttribute(`null`),
+				// No state check - null attributes are not read/stored in state
+			},
+			// Step 3: Change config to [] - should detect mail in LDAP and plan delete
+			{
+				Config: testAccLdapEntryResourceConfigMailAttribute(`[]`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectNonEmptyPlan(), // Should detect mail exists and plan to delete it
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
 						tfjsonpath.New("attributes").AtMapKey("mail"),

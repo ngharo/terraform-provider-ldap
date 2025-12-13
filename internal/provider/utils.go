@@ -147,3 +147,26 @@ func encodeUnicodePwd(password string) (string, error) {
 	}
 	return pwdEncoded, nil
 }
+
+// AttributeExistsInLDAP checks if an attribute exists on an LDAP entry.
+// Returns true if the attribute exists (even if empty), false if it doesn't exist.
+// Returns an error if the LDAP query fails.
+func AttributeExistsInLDAP(conn *ldap.Conn, dn string, attributeName string) (bool, []string, error) {
+	sr, err := LdapSearch(conn, dn, "base", "(objectClass=*)", []string{attributeName})
+	if err != nil {
+		return false, nil, err
+	}
+
+	if len(sr.Entries) == 0 {
+		return false, nil, fmt.Errorf("entry not found: %s", dn)
+	}
+
+	entry := sr.Entries[0]
+	for _, attr := range entry.Attributes {
+		if attr.Name == attributeName {
+			return true, attr.Values, nil
+		}
+	}
+
+	return false, nil, nil
+}
