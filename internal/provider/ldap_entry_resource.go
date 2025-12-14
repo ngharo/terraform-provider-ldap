@@ -53,30 +53,20 @@ func (r *LdapEntryResource) Schema(ctx context.Context, req resource.SchemaReque
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `Manages an LDAP entry. Each entry is identified by its Distinguished Name (DN) and contains attributes.
 
-## Managing Attributes: Null vs Empty Lists
-The ` + "`ldap_entry`" + ` resource supports three ways to handle LDAP attributes, each with different behavior:
-
-### Managed Attributes (Non-null values)
-When you specify an attribute with a value (including an empty list ` + "`[]`" + `), the provider **actively manages** that attribute.
-
-### Unmanaged Attributes (Null values)
-When you set an attribute to ` + "`null`" + `, the provider **does not manage** that attribute, but it will **read and refresh** the value from the LDAP server.
-
-**Important Limitation:** During resource creation, null attributes appear as ` + "`null`" + ` in state. Actual values from the LDAP server appear after the next ` + "`terraform refresh` or `terraform plan`" + `.
-
-### Omitted Attributes
-When you don't include an attribute in the configuration at all, the provider will **not read or manage** it.`,
+### Omitted and null attributes
+Null or omitted attributes in the configuration are **not read or managed** by the provider.
+`,
 
 		Attributes: map[string]schema.Attribute{
 			"dn": schema.StringAttribute{
-				MarkdownDescription: "The distinguished name (DN) of the LDAP entry. This uniquely identifies the entry in the LDAP directory tree. Changing this forces a new resource to be created.",
+				MarkdownDescription: "The distinguished name (DN) of the LDAP entry. Changing this forces a new resource to be created.",
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of LDAP attributes for the entry. The keys are attribute names and values are lists of attribute values. Null values are not managed by Terraform but read from LDAP on refresh. Empty list values will be actively managed by Terraform.",
+				MarkdownDescription: "Map of LDAP attributes for the entry. Attribute values must be described as lists, even for single values. The `objectClass` attribute is required and defines the schema for the entry.",
 				Required:            true,
 				ElementType:         types.ListType{ElemType: types.StringType},
 				PlanModifiers: []planmodifier.Map{
@@ -84,13 +74,13 @@ When you don't include an attribute in the configuration at all, the provider wi
 				},
 			},
 			"attributes_wo": schema.MapAttribute{
-				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. Use this for sensitive data like passwords, API keys, or other secrets. Must be used in conjunction with `attributes_wo_version`. Requires Terraform 1.11 or later. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
+				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. Must be used in conjunction with `attributes_wo_version`. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
 				Optional:            true,
 				WriteOnly:           true,
 				ElementType:         types.ListType{ElemType: types.StringType},
 			},
 			"attributes_wo_version": schema.Int64Attribute{
-				MarkdownDescription: "Version number for write-only attributes. Increment this value (e.g., 1, 2, 3) whenever you want to update the `attributes_wo` values on the LDAP server. Since write-only attributes are not stored in state, Terraform cannot detect changes to them. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.",
+				MarkdownDescription: "Version number for write-only attributes. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.",
 				Optional:            true,
 			},
 			"id": schema.StringAttribute{
@@ -192,7 +182,11 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	for attrName := range attrsMap {
+	for attrName, attrValue := range attrsMap {
+		// Skip null attributes - they should not be read or refreshed
+		if attrValue.IsNull() {
+			continue
+		}
 		attributesToRequest = append(attributesToRequest, attrName)
 	}
 
@@ -310,9 +304,26 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	for key, newValues := range attributes {
 		if currentValues, exists := currentAttrs[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
 			if len(newValues) == 0 {
-				// Delete attribute when set to empty list
-				// Active Directory and some LDAP servers reject Replace with empty values
-				modifyReq.Delete(key, nil)
+				// Delete attribute if it exists in LDAP
+				// Check state first (fast path), then check LDAP (for null → [] transitions)
+				shouldDelete := exists
+				if !shouldDelete {
+					// Attribute not in state - check if it exists in LDAP
+					// This handles null → [] transitions where the attribute exists but wasn't tracked
+					existsInLDAP, _, err := AttributeExistsInLDAP(r.client, plan.DN.ValueString(), key)
+					if err != nil {
+						resp.Diagnostics.AddError(
+							"Error checking LDAP attribute existence",
+							fmt.Sprintf("Unable to check if attribute %s exists for %s: %s", key, plan.DN.ValueString(), err),
+						)
+						return
+					}
+					shouldDelete = existsInLDAP
+				}
+
+				if shouldDelete {
+					modifyReq.Delete(key, nil)
+				}
 			} else {
 				modifyReq.Replace(key, newValues)
 			}
@@ -441,14 +452,13 @@ func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req p
 		return
 	}
 
-	// Check if all managed attributes are equal as sets
-	// Null attributes in config are unmanaged and should not trigger diffs
+	// Check if all attributes are equal as sets
+	// Null attributes in config are ignored (treated as if not present)
 	allEqual := true
 
-	// Compare only managed (non-null) attributes from config
-	// Attributes in state that are null in config or don't exist in config are ignored
+	// Compare non-null attributes from config against state
 	for key, configList := range configMap {
-		// Skip null attributes - they are unmanaged and should not be compared
+		// Skip null attributes - they should not be compared
 		if configList.IsNull() {
 			continue
 		}
@@ -479,38 +489,29 @@ func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req p
 		}
 	}
 
-	// If all managed attributes are equal, build a plan value that:
-	// - Uses state values for managed attributes (to preserve order)
-	// - Uses state values for unmanaged (null) attributes in config
-	// - Omits attributes that are in state but not in config
+	// Check for managed → unmanaged transitions (non-null → null)
+	// and removed attributes
 	if allEqual {
-		planMap := make(map[string]types.List)
-
-		// Only include attributes that are in config
-		// Use state values to preserve order and avoid diffs for null attributes
-		for key, configList := range configMap {
-			if configList.IsNull() {
-				// For null attributes, use state value (could be [] or actual values)
-				if stateList, existsInState := stateMap[key]; existsInState {
-					planMap[key] = stateList
-				}
-			} else {
-				// For managed attributes, use state value if present, otherwise use config
-				if stateList, existsInState := stateMap[key]; existsInState {
-					planMap[key] = stateList
-				} else {
-					planMap[key] = configList
-				}
+		for key, stateList := range stateMap {
+			configList, exists := configMap[key]
+			if !exists {
+				// State has an attribute that config doesn't have at all
+				allEqual = false
+				break
+			}
+			// Detect managed → unmanaged transition (non-null → null)
+			// This should generate a plan to delete the attribute
+			if !stateList.IsNull() && configList.IsNull() {
+				allEqual = false
+				break
 			}
 		}
+	}
 
-		planValue, planDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, planMap)
-		diags = append(diags, planDiags...)
-		if diags.HasError() {
-			return
-		}
-
-		resp.PlanValue = planValue
+	// If all attributes are equal as sets, use state value to prevent spurious diff
+	// Otherwise leave plan as-is (Terraform will use config value)
+	if allEqual {
+		resp.PlanValue = req.StateValue
 	}
 }
 
@@ -538,7 +539,7 @@ func stringSlicesEqual(a, b []string) bool {
 }
 
 // unmarshalTerraformAttributes converts a Terraform Map type to map[string][]string.
-// Null values are skipped - they represent unmanaged attributes that should not be modified.
+// Null values are ignored and not included in the output map.
 func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs map[string][]string) diag.Diagnostics {
 	var diag diag.Diagnostics
 	attrsMap := make(map[string]types.List)
@@ -550,7 +551,11 @@ func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs m
 	}
 
 	for key, valueList := range attrsMap {
-		tflog.Trace(ctx, fmt.Sprintf("key: %s | type: %s | isnull: %v", key, valueList.Type(ctx), valueList.IsNull()))
+		// Skip null values - they should be ignored
+		if valueList.IsNull() {
+			continue
+		}
+
 		var values []string
 
 		diags := valueList.ElementsAs(ctx, &values, false)
