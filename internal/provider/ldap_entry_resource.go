@@ -489,17 +489,22 @@ func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req p
 		}
 	}
 
-	// Check that state doesn't have extra attributes that config doesn't have
-	// (unless config has them as null, which means "ignored")
+	// Check for managed → unmanaged transitions (non-null → null)
+	// and removed attributes
 	if allEqual {
-		for key := range stateMap {
-			_, exists := configMap[key]
+		for key, stateList := range stateMap {
+			configList, exists := configMap[key]
 			if !exists {
 				// State has an attribute that config doesn't have at all
 				allEqual = false
 				break
 			}
-			// If config has it as null, that's fine - it's ignored
+			// Detect managed → unmanaged transition (non-null → null)
+			// This should generate a plan to delete the attribute
+			if !stateList.IsNull() && configList.IsNull() {
+				allEqual = false
+				break
+			}
 		}
 	}
 

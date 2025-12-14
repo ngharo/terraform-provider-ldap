@@ -158,7 +158,7 @@ func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create a user with empty mail
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`[]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = []`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
@@ -194,7 +194,7 @@ func TestAccLdapEntryResource_EmptyAttributes(t *testing.T) {
 						t.Fatalf("failed to add mail attribute: %v", err)
 					}
 				},
-				Config: testAccLdapEntryResourceConfigMailAttribute(`[]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = []`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					// Verify that after apply, mail is back to empty (desired state enforced)
 					statecheck.ExpectKnownValue(
@@ -216,7 +216,7 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create a user with two mails
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`["foo@example.com", "bar@example.com"]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = ["foo@example.com", "bar@example.com"]`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
@@ -227,7 +227,7 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 			},
 			// Step 2: Update user to one mail
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`["foo@example.com"]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = ["foo@example.com"]`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
@@ -238,7 +238,7 @@ func TestAccLdapEntryResource_MailAttributesTransition(t *testing.T) {
 			},
 			// Step 3: Update user to no mail
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`[]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = []`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
@@ -259,7 +259,7 @@ func TestAccLdapEntryResource_NullAttribute(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Step 1: Create a user with two mails
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`null`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = null`),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
 						"ldap_entry.test_user",
@@ -271,7 +271,6 @@ func TestAccLdapEntryResource_NullAttribute(t *testing.T) {
 			// Step 2: Add mail externally to LDAP (simulating external management)
 			{
 				PreConfig: func() {
-					// Simulate external modification by adding mail attribute directly to LDAP
 					conn, err := ldap.DialURL("ldap://localhost:3389")
 					if err != nil {
 						t.Fatalf("failed to connect to LDAP server: %v", err)
@@ -290,12 +289,17 @@ func TestAccLdapEntryResource_NullAttribute(t *testing.T) {
 						t.Fatalf("failed to add mail attribute: %v", err)
 					}
 				},
-				Config: testAccLdapEntryResourceConfigMailAttribute(`null`),
-				// No state check - null attributes are not read/stored in state
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = null`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						// null attributes should not have been read
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
 			},
 			// Step 3: Change config to [] - should detect mail in LDAP and plan delete
 			{
-				Config: testAccLdapEntryResourceConfigMailAttribute(`[]`),
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = []`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectNonEmptyPlan(), // Should detect mail exists and plan to delete it
@@ -313,7 +317,79 @@ func TestAccLdapEntryResource_NullAttribute(t *testing.T) {
 	})
 }
 
-func testAccLdapEntryResourceConfigMailAttribute(mails string) string {
+func TestAccLdapEntryResource_NullAttributeTransition(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
+			// Step 1: Create a user with mail
+			{
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = ["foo@example.com"]`),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_user",
+						tfjsonpath.New("attributes").AtMapKey("mail"),
+						knownvalue.ListSizeExact(1),
+					),
+				},
+			},
+			// Step 2: Change config to null - unknown behavior
+			{
+				Config: testAccLdapEntryResourceConfigAttribute(`mail = null`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectNonEmptyPlan(),
+					},
+				},
+				PostApplyFunc: func() {
+					// Verify that mail attribute was removed on the LDAP server
+					// (transitioning to null should remove the attribute)
+					conn, err := ldap.DialURL("ldap://localhost:3389")
+					if err != nil {
+						t.Fatalf("failed to connect to LDAP server: %v", err)
+					}
+					defer conn.Close()
+
+					err = conn.Bind("cn=Manager,dc=example,dc=com", "secret")
+					if err != nil {
+						t.Fatalf("failed to bind to LDAP server: %v", err)
+					}
+
+					// Search for the mail attribute on the server
+					searchReq := ldap.NewSearchRequest(
+						"uid=testuser,dc=example,dc=com",
+						ldap.ScopeBaseObject,
+						ldap.NeverDerefAliases,
+						0,
+						0,
+						false,
+						"(objectClass=*)",
+						[]string{"mail"},
+						nil,
+					)
+
+					sr, err := conn.Search(searchReq)
+					if err != nil {
+						t.Fatalf("failed to search LDAP: %v", err)
+					}
+
+					if len(sr.Entries) == 0 {
+						t.Fatalf("entry not found in LDAP")
+					}
+
+					entry := sr.Entries[0]
+					for _, attr := range entry.Attributes {
+						if attr.Name == "mail" {
+							t.Fatalf("mail attribute was not removed on server")
+						}
+					}
+				},
+			},
+		},
+	})
+}
+func testAccLdapEntryResourceConfigAttribute(attr string) string {
 	return fmt.Sprintf(`
 provider "ldap" {
   url = "ldap://localhost:3389"
@@ -328,10 +404,10 @@ resource "ldap_entry" "test_user" {
     cn = ["Test User"]
     sn = ["User"]
     uid = ["testuser"]
-    mail = %s
+    %s
   }
 }
-`, mails)
+`, attr)
 }
 
 func testAccCheckLdapEntryDestroy(s *terraform.State) error {
