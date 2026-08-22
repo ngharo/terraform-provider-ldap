@@ -8,6 +8,7 @@ between implementations (OpenLDAP, Active Directory, etc.). Recommend wrapping i
 ## Resources and Data Sources
 
 - **`ldap_entry`**: Manage LDAP entries (Create, Read, Update, Delete)
+- **`ldap_value`**: Assert a single value is present in a multi-valued attribute (e.g. group membership)
 - **`ldap_search`**: Query LDAP directories for existing entries
 
 ## Documentation
@@ -16,6 +17,7 @@ Read latest stable release documentation at https://registry.terraform.io/provid
 
 - [Provider Documentation](./docs/index.md)
 - [ldap_entry Resource](./docs/resources/entry.md)
+- [ldap_value Resource](./docs/resources/value.md)
 - [ldap_search Data Source](./docs/data-sources/search.md)
 
 
