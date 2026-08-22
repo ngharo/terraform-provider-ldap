@@ -126,12 +126,9 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	if !config.AttributesWO.IsNull() {
-		diags = unmarshalTerraformAttributes(ctx, &config.AttributesWO, attributes)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	resp.Diagnostics.Append(mergeWriteOnlyAttributes(ctx, config.AttributesWO, attributes)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Special handling for unicodePwd attribute (Active Directory)
@@ -190,25 +187,12 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		attributesToRequest = append(attributesToRequest, attrName)
 	}
 
-	// During import, state is empty, and we don't have access to the config
-	// Check if import specified which attributes to fetch via private state
+	// During import, state is empty, and we don't have access to the config.
+	// Fall back to whatever ImportState recorded via private state.
 	if len(attributesToRequest) == 0 {
-		privateData, diags := req.Private.GetKey(ctx, "import_attributes")
-		resp.Diagnostics.Append(diags...)
-
-		if len(privateData) > 0 {
-			var importData map[string][]string
-			if err := json.Unmarshal(privateData, &importData); err == nil {
-				if attrs, ok := importData["import_attributes"]; ok {
-					attributesToRequest = attrs
-				}
-			}
-		}
-
-		// If still empty, default to objectClass only
-		if len(attributesToRequest) == 0 {
-			attributesToRequest = []string{"objectClass"}
-		}
+		var importDiags diag.Diagnostics
+		attributesToRequest, importDiags = resolveImportAttributes(ctx, req)
+		resp.Diagnostics.Append(importDiags...)
 	}
 
 	sr, err := LdapSearch(r.client, state.DN.ValueString(), "base", "(objectClass=*)", attributesToRequest)
@@ -264,8 +248,10 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	attributes := make(map[string][]string)
-	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, attributes)
+	// desiredAttrs is the full set of attributes the entry should have after this
+	// update, as declared by the plan (and, below, any write-only attributes).
+	desiredAttrs := make(map[string][]string)
+	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, desiredAttrs)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -275,21 +261,20 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 
 	// Convert write-only attributes from config only if version changed
 	if versionChanged && !config.AttributesWO.IsNull() {
-		diags = unmarshalTerraformAttributes(ctx, &config.AttributesWO, attributes)
-		resp.Diagnostics.Append(diags...)
+		resp.Diagnostics.Append(mergeWriteOnlyAttributes(ctx, config.AttributesWO, desiredAttrs)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 
 		// Special handling for unicodePwd attribute (Active Directory)
-		resp.Diagnostics.Append(ProcessUnicodePwd(attributes)...)
+		resp.Diagnostics.Append(ProcessUnicodePwd(desiredAttrs)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
 
-	// Get attributes from state for comparisons
-	// Needed to build up LDAP replace and delete ops
+	// currentAttrs is what the entry is believed to have before this update,
+	// needed to diff against desiredAttrs and build the LDAP replace/delete ops below.
 	currentAttrs := make(map[string][]string)
 	diags = unmarshalTerraformAttributes(ctx, &state.Attributes, currentAttrs)
 	resp.Diagnostics.Append(diags...)
@@ -301,15 +286,17 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	modifyReq := ldap.NewModifyRequest(plan.DN.ValueString(), nil)
 
 	// Update changed attributes
-	for key, newValues := range attributes {
+	for key, newValues := range desiredAttrs {
 		if currentValues, exists := currentAttrs[key]; !exists || !stringSlicesEqual(currentValues, newValues) {
 			if len(newValues) == 0 {
 				// Delete attribute if it exists in LDAP
 				// Check state first (fast path), then check LDAP (for null → [] transitions)
 				shouldDelete := exists
 				if !shouldDelete {
-					// Attribute not in state - check if it exists in LDAP
-					// This handles null → [] transitions where the attribute exists but wasn't tracked
+					// Attribute not in state - check if it exists in LDAP.
+					// This handles null → [] transitions where the attribute exists but
+					// wasn't tracked. Only existence matters here, so the attribute's
+					// current values are discarded.
 					existsInLDAP, _, err := AttributeExistsInLDAP(r.client, plan.DN.ValueString(), key)
 					if err != nil {
 						resp.Diagnostics.AddError(
@@ -332,7 +319,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 
 	// Remove attributes that are no longer present
 	for key := range currentAttrs {
-		if _, exists := attributes[key]; !exists {
+		if _, exists := desiredAttrs[key]; !exists {
 			modifyReq.Delete(key, nil)
 		}
 	}
@@ -568,4 +555,33 @@ func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs m
 	}
 
 	return diag
+}
+
+// mergeWriteOnlyAttributes unmarshals non-null write-only attribute values from woMap
+// into attrs. It is a no-op if woMap is null, matching the behavior of simply skipping
+// the unmarshal call when there are no write-only values to merge.
+func mergeWriteOnlyAttributes(ctx context.Context, woMap types.Map, attrs map[string][]string) diag.Diagnostics {
+	if woMap.IsNull() {
+		return nil
+	}
+	return unmarshalTerraformAttributes(ctx, &woMap, attrs)
+}
+
+// resolveImportAttributes determines which attributes to fetch when Read runs with no
+// tracked state attributes (i.e. immediately after import, before config is available).
+// It prefers the attribute list ImportState recorded in private state, falling back to
+// objectClass alone if none was recorded.
+func resolveImportAttributes(ctx context.Context, req resource.ReadRequest) ([]string, diag.Diagnostics) {
+	privateData, diags := req.Private.GetKey(ctx, "import_attributes")
+
+	if len(privateData) > 0 {
+		var importData map[string][]string
+		if err := json.Unmarshal(privateData, &importData); err == nil {
+			if attrs, ok := importData["import_attributes"]; ok && len(attrs) > 0 {
+				return attrs, diags
+			}
+		}
+	}
+
+	return []string{"objectClass"}, diags
 }
