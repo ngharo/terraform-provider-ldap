@@ -92,7 +92,7 @@ func TestAccLdapValueResource(t *testing.T) {
 						knownvalue.StringExact(memberDN),
 					),
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, "member", memberDN),
+				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 			// ImportState testing
 			{
@@ -137,7 +137,7 @@ func TestAccLdapValueResource_DriftDetection(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccLdapValueResourceConfig(groupDN, memberDN),
-				Check:  testAccCheckLdapValuePresent(groupDN, "member", memberDN),
+				Check:  testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 			// Externally remove the value, then expect a plan to re-add it.
 			{
@@ -165,7 +165,7 @@ func TestAccLdapValueResource_DriftDetection(t *testing.T) {
 						plancheck.ExpectNonEmptyPlan(),
 					},
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, "member", memberDN),
+				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 		},
 	})
@@ -214,13 +214,17 @@ func TestAccLdapValueResource_AdoptExistingValue(t *testing.T) {
 						knownvalue.StringExact(memberDN),
 					),
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, "member", memberDN),
+				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 		},
 	})
 }
 
-func testAccCheckLdapValuePresent(dn, attribute, value string) resource.TestCheckFunc {
+// testAccCheckLdapValuePresent verifies that value is present in the group's
+// member attribute. All callers in this file assert group membership.
+func testAccCheckLdapValuePresent(dn, value string) resource.TestCheckFunc {
+	const attribute = "member"
+
 	return func(s *terraform.State) error {
 		conn, err := ldap.DialURL("ldap://localhost:3389")
 		if err != nil {
