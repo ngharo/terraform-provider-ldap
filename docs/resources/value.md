@@ -22,6 +22,9 @@ On create, the value is added to the attribute if not already present. On delete
 
 Changing `dn`, `attribute`, or `value` forces a new resource to be created.
 
+### Do not combine with `ldap_entry` on the same attribute
+`ldap_entry` treats its `attributes` map as the complete, authoritative set of values for each attribute it declares. If an `ldap_entry` resource and one or more `ldap_value` resources both target the same DN and attribute, `ldap_entry` will detect the values added by `ldap_value` as drift and plan to remove them on every apply. Point `ldap_value` at attributes that no `ldap_entry` resource declares (for example, a group entry provisioned outside of this attribute's management, or in a separate module/workspace).
+
 Additionally, LDAP servers reject removing the last remaining value of an attribute required by the entry's object class (e.g. `groupOfNames.member`). Ensure at least one value (managed elsewhere) always remains, or deletion of the final `ldap_value` will fail with an object class violation.
 
 ## Example Usage
