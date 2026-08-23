@@ -25,7 +25,7 @@ testenv-image:
 
 .testenv-container: testenv-image
 	@echo "Starting test container with $(CONTAINER_ENGINE)..."
-	$(CONTAINER_ENGINE) run -d --rm -p 3389:1389 terraform-provider-ldap:latest > $@
+	$(CONTAINER_ENGINE) run -d --rm -p 127.0.0.1:3389:1389 terraform-provider-ldap:latest > $@
 	@echo "Container ID: $$(cat $@)"
 	@echo "Waiting for container to be ready..."
 	@sleep 5
