@@ -150,6 +150,7 @@ func (p *LdapProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 func (p *LdapProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewLdapEntryResource,
+		NewLdapValueResource,
 	}
 }
 
