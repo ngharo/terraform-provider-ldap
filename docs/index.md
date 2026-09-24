@@ -60,4 +60,6 @@ provider "ldap" {
 
 - `bind_dn` (String) Distinguished name for binding to LDAP server. Can also be set via the `LDAP_BIND_DN` environment variable.
 - `bind_password` (String, Sensitive) Password for binding to LDAP server. Can also be set via the `LDAP_BIND_PASSWORD` environment variable.
+- `dial_timeout` (String) Timeout for establishing the LDAP connection (e.g. `30s`). Can also be set via the `LDAP_DIAL_TIMEOUT` environment variable. Defaults to `60s`.
 - `insecure` (Boolean) Whether the server should be accessed without verifying the TLS certificate. Can also be set via the `LDAP_INSECURE` environment variable. Defaults to `false`.
+- `request_timeout` (String) Timeout for individual LDAP requests (bind, search, add, modify, delete). Can also be set via the `LDAP_REQUEST_TIMEOUT` environment variable. Defaults to `60s`. Set to `0s` to disable (not recommended).

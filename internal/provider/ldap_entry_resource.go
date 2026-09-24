@@ -167,6 +167,11 @@ func (r *LdapEntryResource) Create(ctx context.Context, req resource.CreateReque
 	// LDAP Request Attributes
 	attributes := make(map[string][]string)
 
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
 	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, attributes)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -220,6 +225,11 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	var attributesToRequest []string
 
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
 	var attrsMap map[string]types.List
 	diags := state.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
@@ -242,7 +252,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		resp.Diagnostics.Append(importDiags...)
 	}
 
-	sr, err := LdapSearch(r.client, state.DN.ValueString(), "base", "(objectClass=*)", attributesToRequest)
+	sr, err := LdapSearch(ctx, r.client, state.DN.ValueString(), "base", "(objectClass=*)", attributesToRequest)
 	if err != nil {
 		// The entry was deleted outside of Terraform. Drop it from state so
 		// Terraform plans to recreate it instead of erroring out.
@@ -306,6 +316,11 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 	// desiredAttrs is the full set of attributes the entry should have after this
 	// update, as declared by the plan (and, below, any write-only attributes).
 	desiredAttrs := make(map[string][]string)
+
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
 	diags := unmarshalTerraformAttributes(ctx, &plan.Attributes, desiredAttrs)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -352,7 +367,7 @@ func (r *LdapEntryResource) Update(ctx context.Context, req resource.UpdateReque
 					// This handles null → [] transitions where the attribute exists but
 					// wasn't tracked. Only existence matters here, so the attribute's
 					// current values are discarded.
-					existsInLDAP, _, err := AttributeExistsInLDAP(r.client, plan.DN.ValueString(), key)
+					existsInLDAP, _, err := AttributeExistsInLDAP(ctx, r.client, plan.DN.ValueString(), key)
 					if err != nil {
 						resp.Diagnostics.AddError(
 							"Error checking LDAP attribute existence",
@@ -406,6 +421,11 @@ func (r *LdapEntryResource) Delete(ctx context.Context, req resource.DeleteReque
 	}
 
 	delReq := ldap.NewDelRequest(data.DN.ValueString(), nil)
+
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
 
 	err := r.client.Del(delReq)
 	if err != nil {

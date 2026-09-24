@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -236,7 +237,7 @@ func testAccCheckLdapValuePresent(dn, value string) resource.TestCheckFunc {
 			return fmt.Errorf("failed to bind to LDAP server: %w", err)
 		}
 
-		sr, err := LdapSearch(conn, dn, "base", "(objectClass=*)", []string{attribute})
+		sr, err := LdapSearch(context.Background(), conn, dn, "base", "(objectClass=*)", []string{attribute})
 		if err != nil {
 			return fmt.Errorf("failed to search LDAP: %w", err)
 		}
@@ -280,7 +281,7 @@ func testAccCheckLdapValueDestroy(s *terraform.State) error {
 		attribute := rs.Primary.Attributes["attribute"]
 		value := rs.Primary.Attributes["value"]
 
-		sr, err := LdapSearch(conn, dn, "base", "(objectClass=*)", []string{attribute})
+		sr, err := LdapSearch(context.Background(), conn, dn, "base", "(objectClass=*)", []string{attribute})
 		if err != nil {
 			if ldapErr, ok := err.(*ldap.Error); ok && ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
 				// Entry itself is gone; the value is certainly gone too.

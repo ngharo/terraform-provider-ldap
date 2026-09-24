@@ -111,6 +111,11 @@ func (r *LdapValueResource) Create(ctx context.Context, req resource.CreateReque
 	attribute := plan.Attribute.ValueString()
 	value := plan.Value.ValueString()
 
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
 	modifyReq := ldap.NewModifyRequest(dn, nil)
 	modifyReq.Add(attribute, []string{value})
 
@@ -146,7 +151,12 @@ func (r *LdapValueResource) Read(ctx context.Context, req resource.ReadRequest, 
 	attribute := state.Attribute.ValueString()
 	value := state.Value.ValueString()
 
-	sr, err := LdapSearch(r.client, dn, "base", "(objectClass=*)", []string{attribute})
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
+	sr, err := LdapSearch(ctx, r.client, dn, "base", "(objectClass=*)", []string{attribute})
 	if err != nil {
 		var ldapErr *ldap.Error
 		if errors.As(err, &ldapErr) && ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
@@ -212,6 +222,11 @@ func (r *LdapValueResource) Delete(ctx context.Context, req resource.DeleteReque
 	dn := state.DN.ValueString()
 	attribute := state.Attribute.ValueString()
 	value := state.Value.ValueString()
+
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
 
 	modifyReq := ldap.NewModifyRequest(dn, nil)
 	modifyReq.Delete(attribute, []string{value})

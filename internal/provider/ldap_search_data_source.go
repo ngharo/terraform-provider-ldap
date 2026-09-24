@@ -103,6 +103,11 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
 	// sub is default scope
 	scope := "sub"
 	if !data.Scope.IsNull() {
@@ -118,7 +123,7 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 	}
 
-	searchResult, err := LdapSearch(d.conn, data.BaseDN.ValueString(), scope, data.Filter.ValueString(), attributes)
+	searchResult, err := LdapSearch(ctx, d.conn, data.BaseDN.ValueString(), scope, data.Filter.ValueString(), attributes)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to perform LDAP search", err.Error())
 		return
