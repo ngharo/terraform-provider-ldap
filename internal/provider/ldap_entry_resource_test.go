@@ -410,6 +410,99 @@ resource "ldap_entry" "test_user" {
 `, attr)
 }
 
+// TestAccLdapEntryResource_ExternalDelete proves that Read tolerates an entry
+// having been deleted out-of-band. After the entry is removed directly from the
+// LDAP server, the next refresh must observe it as missing and plan to recreate
+// it (RemoveResource), rather than surfacing an error diagnostic.
+//
+// Regression test for the Read path not handling LDAPResultNoSuchObject.
+func TestAccLdapEntryResource_ExternalDelete(t *testing.T) {
+	dn := "cn=external-delete,dc=example,dc=com"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
+			// Step 1: Create the entry through Terraform.
+			{
+				Config: testAccLdapEntryResourceConfigExternalDelete(dn),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("id"),
+						knownvalue.StringExact(dn),
+					),
+				},
+			},
+			// Step 2: Delete the entry out-of-band, then re-apply the same config.
+			// Refresh/Read runs first and must treat the missing entry as drift,
+			// planning a recreation instead of failing.
+			{
+				PreConfig: func() {
+					testAccDeleteLdapEntryExternally(t, dn)
+				},
+				Config: testAccLdapEntryResourceConfigExternalDelete(dn),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectNonEmptyPlan(),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test",
+						tfjsonpath.New("id"),
+						knownvalue.StringExact(dn),
+					),
+				},
+			},
+		},
+	})
+}
+
+// testAccLdapEntryResourceConfigExternalDelete builds a config whose DN RDN
+// (`cn`) value matches the `cn` attribute, as LDAP servers require (and may
+// implicitly enforce) the RDN to be present among the entry's attributes.
+func testAccLdapEntryResourceConfigExternalDelete(dn string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = "ldap://localhost:3389"
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test" {
+  dn = %[1]q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn = ["external-delete"]
+    sn = ["user"]
+    mail = ["external-delete@example.com"]
+  }
+}
+`, dn)
+}
+
+// testAccDeleteLdapEntryExternally removes an LDAP entry directly, simulating
+// drift caused outside of Terraform (e.g. manual deletion or another tool).
+func testAccDeleteLdapEntryExternally(t *testing.T, dn string) {
+	t.Helper()
+
+	conn, err := ldap.DialURL("ldap://localhost:3389")
+	if err != nil {
+		t.Fatalf("failed to connect to LDAP server: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.Bind("cn=Manager,dc=example,dc=com", "secret"); err != nil {
+		t.Fatalf("failed to bind to LDAP server: %v", err)
+	}
+
+	if err := conn.Del(ldap.NewDelRequest(dn, nil)); err != nil {
+		t.Fatalf("failed to delete entry %s externally: %v", dn, err)
+	}
+}
+
 func testAccCheckLdapEntryDestroy(s *terraform.State) error {
 	// Create LDAP connection to verify entries are destroyed
 	conn, err := ldap.DialURL("ldap://localhost:3389")

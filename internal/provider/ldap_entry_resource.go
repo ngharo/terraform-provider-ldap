@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -197,6 +198,13 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	sr, err := LdapSearch(r.client, state.DN.ValueString(), "base", "(objectClass=*)", attributesToRequest)
 	if err != nil {
+		// The entry was deleted outside of Terraform. Drop it from state so
+		// Terraform plans to recreate it instead of erroring out.
+		var ldapErr *ldap.Error
+		if errors.As(err, &ldapErr) && ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error reading LDAP entry",
 			fmt.Sprintf("Unable to read LDAP entry %s: %s", state.DN.ValueString(), err),
@@ -354,6 +362,12 @@ func (r *LdapEntryResource) Delete(ctx context.Context, req resource.DeleteReque
 
 	err := r.client.Del(delReq)
 	if err != nil {
+		// The entry is already gone (e.g. deleted outside of Terraform);
+		// deleting is idempotent, so treat this as success.
+		var ldapErr *ldap.Error
+		if errors.As(err, &ldapErr) && ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error deleting LDAP entry",
 			fmt.Sprintf("Unable to delete LDAP entry %s: %s", data.DN.ValueString(), err),
