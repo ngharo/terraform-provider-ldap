@@ -62,6 +62,8 @@ func testAccCreateLdapValueTestGroup(t *testing.T, dn, seedMemberDN string) {
 }
 
 func TestAccLdapValueResource(t *testing.T) {
+	testAccSkipIfNotEnabled(t)
+
 	groupDN := "cn=valuetest,ou=groups,dc=example,dc=com"
 	seedMemberDN := "cn=seed,dc=example,dc=com"
 	memberDN := "cn=Manager,dc=example,dc=com"
@@ -92,8 +94,8 @@ func TestAccLdapValueResource(t *testing.T) {
 						tfjsonpath.New("value"),
 						knownvalue.StringExact(memberDN),
 					),
+					stateCheckLdapValuePresent("ldap_value.test"),
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 			// ImportState testing
 			{
@@ -125,6 +127,8 @@ resource "ldap_value" "test" {
 }
 
 func TestAccLdapValueResource_DriftDetection(t *testing.T) {
+	testAccSkipIfNotEnabled(t)
+
 	groupDN := "cn=valuedrift,ou=groups,dc=example,dc=com"
 	seedMemberDN := "cn=seed,dc=example,dc=com"
 	memberDN := "cn=Manager,dc=example,dc=com"
@@ -138,7 +142,9 @@ func TestAccLdapValueResource_DriftDetection(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccLdapValueResourceConfig(groupDN, memberDN),
-				Check:  testAccCheckLdapValuePresent(groupDN, memberDN),
+				ConfigStateChecks: []statecheck.StateCheck{
+					stateCheckLdapValuePresent("ldap_value.test"),
+				},
 			},
 			// Externally remove the value, then expect a plan to re-add it.
 			{
@@ -166,13 +172,17 @@ func TestAccLdapValueResource_DriftDetection(t *testing.T) {
 						plancheck.ExpectNonEmptyPlan(),
 					},
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
+				ConfigStateChecks: []statecheck.StateCheck{
+					stateCheckLdapValuePresent("ldap_value.test"),
+				},
 			},
 		},
 	})
 }
 
 func TestAccLdapValueResource_AdoptExistingValue(t *testing.T) {
+	testAccSkipIfNotEnabled(t)
+
 	groupDN := "cn=valueadopt,ou=groups,dc=example,dc=com"
 	seedMemberDN := "cn=seed,dc=example,dc=com"
 	memberDN := "cn=Manager,dc=example,dc=com"
@@ -214,51 +224,11 @@ func TestAccLdapValueResource_AdoptExistingValue(t *testing.T) {
 						tfjsonpath.New("value"),
 						knownvalue.StringExact(memberDN),
 					),
+					stateCheckLdapValuePresent("ldap_value.test"),
 				},
-				Check: testAccCheckLdapValuePresent(groupDN, memberDN),
 			},
 		},
 	})
-}
-
-// testAccCheckLdapValuePresent verifies that value is present in the group's
-// member attribute. All callers in this file assert group membership.
-func testAccCheckLdapValuePresent(dn, value string) resource.TestCheckFunc {
-	const attribute = "member"
-
-	return func(s *terraform.State) error {
-		conn, err := ldap.DialURL("ldap://localhost:3389")
-		if err != nil {
-			return fmt.Errorf("failed to connect to LDAP server: %w", err)
-		}
-		defer conn.Close()
-
-		if err := conn.Bind("cn=Manager,dc=example,dc=com", "secret"); err != nil {
-			return fmt.Errorf("failed to bind to LDAP server: %w", err)
-		}
-
-		sr, err := LdapSearch(context.Background(), conn, dn, "base", "(objectClass=*)", []string{attribute})
-		if err != nil {
-			return fmt.Errorf("failed to search LDAP: %w", err)
-		}
-
-		if len(sr.Entries) == 0 {
-			return fmt.Errorf("entry %s not found", dn)
-		}
-
-		for _, attr := range sr.Entries[0].Attributes {
-			if attr.Name != attribute {
-				continue
-			}
-			for _, v := range attr.Values {
-				if v == value {
-					return nil
-				}
-			}
-		}
-
-		return fmt.Errorf("value %q not found in attribute %q on %s", value, attribute, dn)
-	}
 }
 
 func testAccCheckLdapValueDestroy(s *terraform.State) error {

@@ -4,8 +4,10 @@
 package provider
 
 import (
+	"os"
 	"testing"
 
+	"github.com/go-ldap/ldap/v3"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
@@ -18,7 +20,23 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 }
 
 func testAccPreCheck(t *testing.T) {
-	// You can add code here to run prior to any test case execution, for example assertions
-	// about the appropriate environment variables being set are common to see in a pre-check
-	// function.
+	// Fail fast with a clear message if the containerized test LDAP server is
+	// not running, instead of surfacing connection errors in every resource
+	// operation.
+	conn, err := ldap.DialURL(testAccLdapURL)
+	if err != nil {
+		t.Fatalf("LDAP test server unavailable at %s (start it with `make test`): %v", testAccLdapURL, err)
+	}
+	conn.Close()
+}
+
+// testAccSkipIfNotEnabled skips the test unless acceptance testing is enabled.
+// Call at the very top of tests that perform setup work (e.g. seeding LDAP)
+// before resource.Test: resource.Test only checks TF_ACC once invoked, so
+// setup code placed before it would otherwise run (and fail) in unit-test runs.
+func testAccSkipIfNotEnabled(t *testing.T) {
+	t.Helper()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests skipped unless env 'TF_ACC' set")
+	}
 }

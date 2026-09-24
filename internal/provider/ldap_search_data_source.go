@@ -8,9 +8,11 @@ import (
 	"fmt"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -58,6 +60,9 @@ func (d *LdapSearchDataSource) Schema(ctx context.Context, req datasource.Schema
 			"scope": schema.StringAttribute{
 				MarkdownDescription: "Specifies the scope that to use for search requests. The value should be one of 'base', 'one', or 'sub'. If this argument is not provided, a default of 'sub' will be used.",
 				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("base", "one", "sub"),
+				},
 			},
 			"filter": schema.StringAttribute{
 				MarkdownDescription: "Specifies a filter to use when processing a search.",
@@ -90,6 +95,10 @@ func (d *LdapSearchDataSource) Schema(ctx context.Context, req datasource.Schema
 }
 
 func (d *LdapSearchDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
 	d.conn = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Data Source")
 }
 
