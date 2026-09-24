@@ -73,5 +73,5 @@ output "user_dns" {
 
 Read-Only:
 
-- `attributes` (Map of List of String) The attributes of the entry with their values.
+- `attributes` (Map of Set of String) The attributes of the entry with their values.
 - `dn` (String) The distinguished name of the entry.

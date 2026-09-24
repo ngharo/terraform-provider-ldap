@@ -87,7 +87,7 @@ func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAtt
 		}
 
 		// Convert attributes to types.Map
-		attributesMap, mapDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
+		attributesMap, mapDiags := types.MapValueFrom(ctx, types.SetType{ElemType: types.StringType}, attributes)
 		diags.Append(mapDiags...)
 		if diags.HasError() {
 			return nil, diags

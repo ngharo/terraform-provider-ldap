@@ -334,7 +334,7 @@ func TestAccLdapEntryResource_NullAttributeTransition(t *testing.T) {
 					),
 				},
 			},
-			// Step 2: Change config to null - unknown behavior
+			// Step 2: Change mail in config to null
 			{
 				Config: testAccLdapEntryResourceConfigAttribute(`mail = null`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
