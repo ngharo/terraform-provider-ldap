@@ -39,8 +39,8 @@ type LdapEntryResource struct {
 // It maps the Terraform schema to Go types for state management.
 type LdapEntryResourceModel struct {
 	DN              types.String `tfsdk:"dn"`                    // Distinguished Name - unique identifier for the LDAP entry
-	Attributes      types.Map    `tfsdk:"attributes"`            // Map of List[String] - regular LDAP attributes stored in state
-	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of List[String] - write-only sensitive attributes (not stored in state)
+	Attributes      types.Map    `tfsdk:"attributes"`            // Map of Set[String] - regular LDAP attributes stored in state
+	AttributesWO    types.Map    `tfsdk:"attributes_wo"`         // Map of Set[String] - write-only sensitive attributes (not stored in state)
 	AttributesWOVer types.Int64  `tfsdk:"attributes_wo_version"` // Version trigger for attributes_wo changes
 	Id              types.String `tfsdk:"id"`                    // Resource identifier (same as DN)
 }
@@ -68,18 +68,15 @@ Null or omitted attributes in the configuration are **not read or managed** by t
 				},
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of LDAP attributes for the entry. Attribute values must be described as lists, even for single values. The `objectClass` attribute is required and defines the schema for the entry.",
+				MarkdownDescription: "Map of LDAP attributes for the entry. Attribute values are unordered sets; order in the configuration is irrelevant. The `objectClass` attribute is required and defines the schema for the entry.",
 				Required:            true,
-				ElementType:         types.ListType{ElemType: types.StringType},
-				PlanModifiers: []planmodifier.Map{
-					AttributesSetSemanticsModifier{},
-				},
+				ElementType:         types.SetType{ElemType: types.StringType},
 			},
 			"attributes_wo": schema.MapAttribute{
-				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. Must be used in conjunction with `attributes_wo_version`. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
+				MarkdownDescription: "Write-only map of LDAP attributes for the entry containing sensitive values. Attribute values are unordered sets. Must be used in conjunction with `attributes_wo_version`. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.",
 				Optional:            true,
 				WriteOnly:           true,
-				ElementType:         types.ListType{ElemType: types.StringType},
+				ElementType:         types.SetType{ElemType: types.StringType},
 			},
 			"attributes_wo_version": schema.Int64Attribute{
 				MarkdownDescription: "Version number for write-only attributes. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.",
@@ -234,7 +231,7 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	var attrsMap map[string]types.List
+	var attrsMap map[string]types.Set
 	diags := state.Attributes.ElementsAs(ctx, &attrsMap, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -288,7 +285,29 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	entry := results[0]
 
-	state.Attributes = entry.Attributes
+	// Null attributes are not read or managed, but their keys must be
+	// preserved in state. Otherwise the refreshed state map would be missing
+	// keys that the configuration still declares as null, producing a perpetual
+	// in-place diff (config null vs. state key absent) on every plan.
+	refreshedAttrs := make(map[string]types.Set)
+	diags = entry.Attributes.ElementsAs(ctx, &refreshedAttrs, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for key, attrValue := range attrsMap {
+		if attrValue.IsNull() {
+			if _, ok := refreshedAttrs[key]; !ok {
+				refreshedAttrs[key] = types.SetNull(types.StringType)
+			}
+		}
+	}
+
+	state.Attributes, diags = types.MapValueFrom(ctx, types.SetType{ElemType: types.StringType}, refreshedAttrs)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	state.Id = state.DN
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -488,107 +507,9 @@ func (r *LdapEntryResource) ImportState(ctx context.Context, req resource.Import
 	}
 }
 
-// AttributesSetSemanticsModifier is a plan modifier that treats list values as sets (order-independent).
-// This is necessary because LDAP returns multi-valued attributes in arbitrary order.
-type AttributesSetSemanticsModifier struct{}
-
-func (m AttributesSetSemanticsModifier) Description(ctx context.Context) string {
-	return "Treats attribute list values as unordered sets"
-}
-
-func (m AttributesSetSemanticsModifier) MarkdownDescription(ctx context.Context) string {
-	return "Treats attribute list values as unordered sets"
-}
-
-func (m AttributesSetSemanticsModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	// If config and state are both known, compare them as sets
-	if req.ConfigValue.IsNull() || req.StateValue.IsNull() {
-		return
-	}
-
-	if req.ConfigValue.IsUnknown() || req.StateValue.IsUnknown() {
-		return
-	}
-
-	// Extract config and state as maps of lists
-	var configMap map[string]types.List
-	var stateMap map[string]types.List
-
-	diags := req.ConfigValue.ElementsAs(ctx, &configMap, false)
-	if diags.HasError() {
-		return
-	}
-
-	diags = req.StateValue.ElementsAs(ctx, &stateMap, false)
-	if diags.HasError() {
-		return
-	}
-
-	// Check if all attributes are equal as sets
-	// Null attributes in config are ignored (treated as if not present)
-	allEqual := true
-
-	// Compare non-null attributes from config against state
-	for key, configList := range configMap {
-		// Skip null attributes - they should not be compared
-		if configList.IsNull() {
-			continue
-		}
-
-		stateList, ok := stateMap[key]
-		if !ok {
-			allEqual = false
-			break
-		}
-
-		var configValues []string
-		var stateValues []string
-
-		diags = configList.ElementsAs(ctx, &configValues, false)
-		if diags.HasError() {
-			return
-		}
-
-		diags = stateList.ElementsAs(ctx, &stateValues, false)
-		if diags.HasError() {
-			return
-		}
-
-		// Use order-independent comparison
-		if !stringSlicesEqual(configValues, stateValues) {
-			allEqual = false
-			break
-		}
-	}
-
-	// Check for managed → unmanaged transitions (non-null → null)
-	// and removed attributes
-	if allEqual {
-		for key, stateList := range stateMap {
-			configList, exists := configMap[key]
-			if !exists {
-				// State has an attribute that config doesn't have at all
-				allEqual = false
-				break
-			}
-			// Detect managed → unmanaged transition (non-null → null)
-			// This should generate a plan to delete the attribute
-			if !stateList.IsNull() && configList.IsNull() {
-				allEqual = false
-				break
-			}
-		}
-	}
-
-	// If all attributes are equal as sets, use state value to prevent spurious diff
-	// Otherwise leave plan as-is (Terraform will use config value)
-	if allEqual {
-		resp.PlanValue = req.StateValue
-	}
-}
-
 // Helper function to compare string slices as sets (order-independent).
 // LDAP multi-valued attributes are unordered, so we need to compare them as sets.
+// Used when diffing plan against state values before issuing LDAP modify ops.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -614,7 +535,7 @@ func stringSlicesEqual(a, b []string) bool {
 // Null values are ignored and not included in the output map.
 func unmarshalTerraformAttributes(ctx context.Context, tfMap *types.Map, attrs map[string][]string) diag.Diagnostics {
 	var diag diag.Diagnostics
-	attrsMap := make(map[string]types.List)
+	attrsMap := make(map[string]types.Set)
 
 	diags := tfMap.ElementsAs(ctx, &attrsMap, false)
 	diag.Append(diags...)

@@ -85,7 +85,7 @@ func (d *LdapSearchDataSource) Schema(ctx context.Context, req datasource.Schema
 						"attributes": schema.MapAttribute{
 							MarkdownDescription: "The attributes of the entry with their values.",
 							Computed:            true,
-							ElementType:         types.ListType{ElemType: types.StringType},
+							ElementType:         types.SetType{ElemType: types.StringType},
 						},
 					},
 				},
@@ -151,7 +151,7 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	resultsList, listDiags := types.ListValueFrom(ctx, types.ObjectType{
 		AttrTypes: map[string]attr.Type{
 			"dn":         types.StringType,
-			"attributes": types.MapType{ElemType: types.ListType{ElemType: types.StringType}},
+			"attributes": types.MapType{ElemType: types.SetType{ElemType: types.StringType}},
 		},
 	}, results)
 

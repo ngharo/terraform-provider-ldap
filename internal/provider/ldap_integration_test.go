@@ -153,11 +153,15 @@ func TestAccLdapIntegration_ComplexFilters(t *testing.T) {
 						tfjsonpath.New("results"),
 						knownvalue.ListSizeExact(2), // Should find both user and group
 					),
-					// Verify NOT filter excludes certain entries
+					// Verify NOT filter excludes certain entries: the result is a person
+					// entry. objectClass values are an unordered set, so assert the set
+					// contains "person" rather than checking a positional index.
 					statecheck.ExpectKnownValue(
 						"data.ldap_search.not_groups",
-						tfjsonpath.New("results").AtSliceIndex(0).AtMapKey("attributes").AtMapKey("objectClass").AtSliceIndex(0),
-						knownvalue.StringExact("person"),
+						tfjsonpath.New("results").AtSliceIndex(0).AtMapKey("attributes").AtMapKey("objectClass"),
+						knownvalue.SetPartial([]knownvalue.Check{
+							knownvalue.StringExact("person"),
+						}),
 					),
 				},
 			},

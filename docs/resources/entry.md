@@ -110,14 +110,14 @@ resource "ldap_entry" "ad_user" {
 
 ### Required
 
-- `attributes` (Map of List of String) Map of LDAP attributes for the entry. Attribute values must be described as lists, even for single values. The `objectClass` attribute is required and defines the schema for the entry.
+- `attributes` (Map of Set of String) Map of LDAP attributes for the entry. Attribute values are unordered sets; order in the configuration is irrelevant. The `objectClass` attribute is required and defines the schema for the entry.
 - `dn` (String) The distinguished name (DN) of the LDAP entry. Changing this forces a new resource to be created.
 
 ### Optional
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `attributes_wo` (Map of List of String, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only map of LDAP attributes for the entry containing sensitive values. Must be used in conjunction with `attributes_wo_version`. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.
+- `attributes_wo` (Map of Set of String, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only map of LDAP attributes for the entry containing sensitive values. Attribute values are unordered sets. Must be used in conjunction with `attributes_wo_version`. NOTE: `unicodePwd` will be automatically encoded as UTF-16LE for Active Directory.
 - `attributes_wo_version` (Number) Version number for write-only attributes. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.
 
 ### Read-Only
