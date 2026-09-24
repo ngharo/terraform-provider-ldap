@@ -98,6 +98,10 @@ Null or omitted attributes in the configuration are **not read or managed** by t
 
 // Configure initializes the resource with the LDAP client connection from the provider.
 func (r *LdapEntryResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
 	r.client = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Resource")
 }
 

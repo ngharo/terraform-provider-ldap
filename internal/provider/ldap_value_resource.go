@@ -95,6 +95,10 @@ Additionally, LDAP servers reject removing the last remaining value of an attrib
 }
 
 func (r *LdapValueResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
 	r.client = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Resource")
 }
 
