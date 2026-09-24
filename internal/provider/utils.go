@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-ldap/ldap/v3"
@@ -35,7 +34,13 @@ func ConvertHumanReadableLDAPScope(scope string) (int, error) {
 	return ldapScope, nil
 }
 
-func LdapSearch(conn *ldap.Conn, baseDN string, scope string, filter string, attributes []string) (*ldap.SearchResult, error) {
+func LdapSearch(ctx context.Context, conn *ldap.Conn, baseDN string, scope string, filter string, attributes []string) (*ldap.SearchResult, error) {
+	// go-ldap cannot cancel an in-flight request, so refuse to start one on an
+	// already-cancelled context.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("LDAP search for %s cancelled: %w", baseDN, err)
+	}
+
 	searchScope, err := ConvertHumanReadableLDAPScope(scope)
 	if err != nil {
 		return nil, err
@@ -56,8 +61,12 @@ func LdapSearch(conn *ldap.Conn, baseDN string, scope string, filter string, att
 	return conn.Search(req)
 }
 
-// Marshals LDAP search results into []LdapEntry.
-func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAttributes []string) ([]LdapEntry, error) {
+// Marshals LDAP search results into []LdapEntry. Conversion diagnostics are
+// returned rather than an error so callers can append them directly to their
+// response diagnostics.
+func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAttributes []string) ([]LdapEntry, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
 	results := make([]LdapEntry, 0, len(sr.Entries))
 
 	for _, entry := range sr.Entries {
@@ -78,9 +87,10 @@ func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAtt
 		}
 
 		// Convert attributes to types.Map
-		attributesMap, diags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
+		attributesMap, mapDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
+		diags.Append(mapDiags...)
 		if diags.HasError() {
-			return nil, errors.New(diags[len(diags)].Detail())
+			return nil, diags
 		}
 
 		result := LdapEntry{
@@ -92,7 +102,7 @@ func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAtt
 		results = append(results, result)
 	}
 
-	return results, nil
+	return results, diags
 }
 
 // GetLdapConnection extracts the LDAP connection from provider data.
@@ -113,6 +123,20 @@ func GetLdapConnection(providerData any, diagnostics *diag.Diagnostics, resource
 	}
 
 	return conn
+}
+
+// cancelledFromContext returns a non-empty diagnostic when ctx is already
+// cancelled or expired, so callers can bail before issuing LDAP calls that
+// go-ldap cannot interrupt mid-flight.
+func cancelledFromContext(ctx context.Context) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if err := ctx.Err(); err != nil {
+		diags.AddError(
+			"LDAP operation cancelled",
+			fmt.Sprintf("Aborting before LDAP request because the context is %s", err),
+		)
+	}
+	return diags
 }
 
 // ProcessUnicodePwd handles special encoding for Active Directory's unicodePwd attribute.
@@ -151,8 +175,8 @@ func encodeUnicodePwd(password string) (string, error) {
 // AttributeExistsInLDAP checks if an attribute exists on an LDAP entry.
 // Returns true if the attribute exists (even if empty), false if it doesn't exist.
 // Returns an error if the LDAP query fails.
-func AttributeExistsInLDAP(conn *ldap.Conn, dn string, attributeName string) (bool, []string, error) {
-	sr, err := LdapSearch(conn, dn, "base", "(objectClass=*)", []string{attributeName})
+func AttributeExistsInLDAP(ctx context.Context, conn *ldap.Conn, dn string, attributeName string) (bool, []string, error) {
+	sr, err := LdapSearch(ctx, conn, dn, "base", "(objectClass=*)", []string{attributeName})
 	if err != nil {
 		return false, nil, err
 	}

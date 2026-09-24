@@ -103,6 +103,11 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
+	if diags := cancelledFromContext(ctx); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
 	// sub is default scope
 	scope := "sub"
 	if !data.Scope.IsNull() {
@@ -118,26 +123,30 @@ func (d *LdapSearchDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 	}
 
-	searchResult, err := LdapSearch(d.conn, data.BaseDN.ValueString(), scope, data.Filter.ValueString(), attributes)
+	searchResult, err := LdapSearch(ctx, d.conn, data.BaseDN.ValueString(), scope, data.Filter.ValueString(), attributes)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to perform LDAP search", err.Error())
 		return
 	}
 
-	results, err := MarshalLdapResults(ctx, searchResult, attributes)
-	if err != nil {
-		resp.Diagnostics.AddError("Failed to convert LDAP search results", err.Error())
+	results, diags := MarshalLdapResults(ctx, searchResult, attributes)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		resp.Diagnostics.AddError(
+			"Failed to convert LDAP search results",
+			fmt.Sprintf("Unable to marshal LDAP search results for base DN %s", data.BaseDN.ValueString()),
+		)
 		return
 	}
 
-	resultsList, diags := types.ListValueFrom(ctx, types.ObjectType{
+	resultsList, listDiags := types.ListValueFrom(ctx, types.ObjectType{
 		AttrTypes: map[string]attr.Type{
 			"dn":         types.StringType,
 			"attributes": types.MapType{ElemType: types.ListType{ElemType: types.StringType}},
 		},
 	}, results)
 
-	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(listDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

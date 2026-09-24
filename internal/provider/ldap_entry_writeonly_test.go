@@ -5,6 +5,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
@@ -76,6 +77,78 @@ func TestAccLdapEntryResource_WriteOnlyAttributes(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccLdapEntryResource_WriteOnlyMissingVersion verifies that a non-empty
+// attributes_wo without attributes_wo_version is rejected at plan time.
+func TestAccLdapEntryResource_WriteOnlyMissingVersion(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccLdapEntryResourceConfigWriteOnlyMissingVersion("cn=writeonly-noversion,dc=example,dc=com"),
+				ExpectError: regexp.MustCompile(`Missing attributes_wo_version`),
+			},
+		},
+	})
+}
+
+// TestAccLdapEntryResource_WriteOnlyVersionMissingAttributes verifies that
+// attributes_wo_version without attributes_wo is rejected at plan time.
+func TestAccLdapEntryResource_WriteOnlyVersionMissingAttributes(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccLdapEntryResourceConfigWriteOnlyVersionOnly("cn=writeonly-novo,dc=example,dc=com"),
+				ExpectError: regexp.MustCompile(`Missing attributes_wo`),
+			},
+		},
+	})
+}
+
+func testAccLdapEntryResourceConfigWriteOnlyMissingVersion(dn string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = "ldap://localhost:3389"
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test_writeonly" {
+  dn = %[1]q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn = ["writeonly-noversion"]
+    sn = ["User"]
+  }
+  attributes_wo = {
+    userPassword = ["secret123"]
+  }
+}
+`, dn)
+}
+
+func testAccLdapEntryResourceConfigWriteOnlyVersionOnly(dn string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = "ldap://localhost:3389"
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "test_writeonly" {
+  dn = %[1]q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn = ["writeonly-novo"]
+    sn = ["User"]
+  }
+  attributes_wo_version = 1
+}
+`, dn)
 }
 
 func testAccLdapEntryResourceConfigWithWriteOnly(dn, password string, version int) string {
