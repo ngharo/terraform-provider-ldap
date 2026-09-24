@@ -1,6 +1,6 @@
 CONTAINER_ENGINE := $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
-default: fmt lint build docs
+default: fmt lint build generate
 
 build: clean
 	go build -v
@@ -39,4 +39,4 @@ clean:
 	rm -f terraform-provider-ldap
 	@echo "Cleaned up build and test artifacts"
 
-.PHONY: fmt lint test build install docs testenv-image clean
+.PHONY: fmt lint test build install generate testenv-image clean

@@ -24,6 +24,7 @@ import (
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &LdapEntryResource{}
 var _ resource.ResourceWithImportState = &LdapEntryResource{}
+var _ resource.ResourceWithValidateConfig = &LdapEntryResource{}
 
 func NewLdapEntryResource() resource.Resource {
 	return &LdapEntryResource{}
@@ -98,6 +99,51 @@ Null or omitted attributes in the configuration are **not read or managed** by t
 // Configure initializes the resource with the LDAP client connection from the provider.
 func (r *LdapEntryResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.client = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Resource")
+}
+
+// ValidateConfig enforces the documented coupling between attributes_wo and
+// attributes_wo_version. Write-only values are only written to the LDAP server
+// when attributes_wo_version changes, so a non-empty attributes_wo without a
+// version would be silently ignored after creation, and a version without any
+// attributes_wo values has nothing to send. Both configurations are rejected.
+func (r *LdapEntryResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	// Write-only attribute values are only delivered to the provider by clients
+	// that support them (Terraform 1.11+). Terraform already reports the
+	// unsupported-client case as its own error, so there is nothing useful for
+	// us to validate here.
+	if !req.ClientCapabilities.WriteOnlyAttributesAllowed {
+		return
+	}
+
+	var config LdapEntryResourceModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Skip validation when either side is unknown, e.g. pending interpolation or
+	// references to resources whose values are not yet known.
+	woSet := !config.AttributesWO.IsNull() && !config.AttributesWO.IsUnknown() && len(config.AttributesWO.Elements()) > 0
+	versionSet := !config.AttributesWOVer.IsNull() && !config.AttributesWOVer.IsUnknown()
+
+	if woSet && !versionSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("attributes_wo"),
+			"Missing attributes_wo_version",
+			"`attributes_wo` requires `attributes_wo_version` to be set. Write-only values are only "+
+				"written to the LDAP server when `attributes_wo_version` changes, so without it the values "+
+				"would be silently ignored after creation.",
+		)
+	}
+
+	if versionSet && !woSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("attributes_wo_version"),
+			"Missing attributes_wo",
+			"`attributes_wo_version` requires `attributes_wo` to be set with the values to write.",
+		)
+	}
 }
 
 // Create creates a new LDAP entry with the specified DN and attributes.
