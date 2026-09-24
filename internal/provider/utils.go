@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-ldap/ldap/v3"
@@ -56,8 +55,12 @@ func LdapSearch(conn *ldap.Conn, baseDN string, scope string, filter string, att
 	return conn.Search(req)
 }
 
-// Marshals LDAP search results into []LdapEntry.
-func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAttributes []string) ([]LdapEntry, error) {
+// Marshals LDAP search results into []LdapEntry. Conversion diagnostics are
+// returned rather than an error so callers can append them directly to their
+// response diagnostics.
+func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAttributes []string) ([]LdapEntry, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
 	results := make([]LdapEntry, 0, len(sr.Entries))
 
 	for _, entry := range sr.Entries {
@@ -78,9 +81,10 @@ func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAtt
 		}
 
 		// Convert attributes to types.Map
-		attributesMap, diags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
+		attributesMap, mapDiags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, attributes)
+		diags.Append(mapDiags...)
 		if diags.HasError() {
-			return nil, errors.New(diags[len(diags)].Detail())
+			return nil, diags
 		}
 
 		result := LdapEntry{
@@ -92,7 +96,7 @@ func MarshalLdapResults(ctx context.Context, sr *ldap.SearchResult, requestedAtt
 		results = append(results, result)
 	}
 
-	return results, nil
+	return results, diags
 }
 
 // GetLdapConnection extracts the LDAP connection from provider data.

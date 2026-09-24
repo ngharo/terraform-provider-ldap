@@ -258,11 +258,12 @@ func (r *LdapEntryResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	results, err := MarshalLdapResults(ctx, sr, attributesToRequest)
-	if err != nil {
+	results, diags := MarshalLdapResults(ctx, sr, attributesToRequest)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
 		resp.Diagnostics.AddError(
-			"Error marshaling LDAP results",
-			fmt.Sprintf("Unable to marshal LDAP results for %s: %s", state.DN.ValueString(), err),
+			"Error reading LDAP entry",
+			fmt.Sprintf("Unable to marshal LDAP results for %s", state.DN.ValueString()),
 		)
 		return
 	}
