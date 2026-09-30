@@ -80,7 +80,7 @@ func TestAccLdapEntryResource_WriteOnlyMissingVersion(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccLdapEntryResourceConfigWriteOnlyMissingVersion("cn=writeonly-noversion,dc=example,dc=com"),
-				ExpectError: regexp.MustCompile(`Missing attributes_wo_version`),
+				ExpectError: regexp.MustCompile(`Attribute "attributes_wo_version" must be specified when "attributes_wo"`),
 			},
 		},
 	})
@@ -95,10 +95,96 @@ func TestAccLdapEntryResource_WriteOnlyVersionMissingAttributes(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccLdapEntryResourceConfigWriteOnlyVersionOnly("cn=writeonly-novo,dc=example,dc=com"),
-				ExpectError: regexp.MustCompile(`Missing attributes_wo`),
+				ExpectError: regexp.MustCompile(`Attribute "attributes_wo" must be specified when "attributes_wo_version"`),
 			},
 		},
 	})
+}
+
+// TestAccLdapEntryResource_WriteOnlyVersionUnknownAtPlan is a regression test
+// for the bug where validation rejected a known, non-empty attributes_wo
+// combined with an attributes_wo_version whose value was unknown at validation
+// time. This is what the provider sees when ldap_entry is wrapped in a module
+// and attributes_wo_version is passed in through an input variable: Terraform
+// validates the child module's resource configuration before the variable has
+// been evaluated, delivering an unknown value. The same unknown value can be
+// produced at the root module by deriving attributes_wo_version from a
+// resource that does not exist yet.
+//
+// The coupling between attributes_wo and attributes_wo_version is enforced with
+// the framework's AlsoRequires validators, which delay validation until all
+// involved attributes have known values. The plan and apply should therefore
+// succeed.
+func TestAccLdapEntryResource_WriteOnlyVersionUnknownAtPlan(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckLdapEntryDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccLdapEntryResourceConfigWriteOnlyUnknownVersion(
+					"cn=dep-unknown-version,dc=example,dc=com",
+					"cn=writeonly-unknown-version,dc=example,dc=com",
+				),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_writeonly",
+						tfjsonpath.New("dn"),
+						knownvalue.StringExact("cn=writeonly-unknown-version,dc=example,dc=com"),
+					),
+					// The version is derived from the dependency entry's id (its DN),
+					// which contains two commas: length(split(...)) is therefore 3.
+					statecheck.ExpectKnownValue(
+						"ldap_entry.test_writeonly",
+						tfjsonpath.New("attributes_wo_version"),
+						knownvalue.Int64Exact(3),
+					),
+					stateCheckLdapEntryAttributeExists("ldap_entry.test_writeonly", "userPassword"),
+				},
+			},
+		},
+	})
+}
+
+// testAccLdapEntryResourceConfigWriteOnlyUnknownVersion derives
+// attributes_wo_version from the id of an ldap_entry created in the same apply,
+// so the version is unknown during the initial plan. This mirrors the unknown
+// value the provider receives during validation when the version is sourced
+// from a module input variable.
+func testAccLdapEntryResourceConfigWriteOnlyUnknownVersion(depDn, dn string) string {
+	return fmt.Sprintf(`
+provider "ldap" {
+  url = %q
+  bind_dn = "cn=Manager,dc=example,dc=com"
+  bind_password = "secret"
+}
+
+resource "ldap_entry" "dependency" {
+  dn = %q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn          = ["dep-unknown-version"]
+    sn          = ["User"]
+  }
+}
+
+resource "ldap_entry" "test_writeonly" {
+  dn = %q
+  attributes = {
+    objectClass = ["person", "organizationalPerson", "inetOrgPerson"]
+    cn          = ["writeonly-unknown-version"]
+    sn          = ["User"]
+  }
+  attributes_wo = {
+    userPassword = ["secret123"]
+  }
+  # Root input variables supplied by the test harness are already known during
+  # planning, so they do not reproduce the bug. Referencing an uncreated resource
+  # gives the provider the same unknown version it receives when validating a
+  # child module before its input variables have been evaluated.
+  attributes_wo_version = length(split(",", ldap_entry.dependency.id))
+}
+`, testAccLdapURL, depDn, dn)
 }
 
 func testAccLdapEntryResourceConfigWriteOnlyMissingVersion(dn string) string {

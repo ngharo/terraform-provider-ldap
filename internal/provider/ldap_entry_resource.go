@@ -11,12 +11,15 @@ import (
 	"sort"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -24,7 +27,6 @@ import (
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &LdapEntryResource{}
 var _ resource.ResourceWithImportState = &LdapEntryResource{}
-var _ resource.ResourceWithValidateConfig = &LdapEntryResource{}
 
 func NewLdapEntryResource() resource.Resource {
 	return &LdapEntryResource{}
@@ -77,10 +79,16 @@ Null or omitted attributes in the configuration are **not read or managed** by t
 				Optional:            true,
 				WriteOnly:           true,
 				ElementType:         types.SetType{ElemType: types.StringType},
+				Validators: []validator.Map{
+					mapvalidator.AlsoRequires(path.MatchRoot("attributes_wo_version")),
+				},
 			},
 			"attributes_wo_version": schema.Int64Attribute{
 				MarkdownDescription: "Version number for write-only attributes. Changing this version number triggers the provider to send the current `attributes_wo` values to the LDAP server during updates.",
 				Optional:            true,
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("attributes_wo")),
+				},
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
@@ -100,51 +108,6 @@ func (r *LdapEntryResource) Configure(ctx context.Context, req resource.Configur
 	}
 
 	r.client = GetLdapConnection(req.ProviderData, &resp.Diagnostics, "Resource")
-}
-
-// ValidateConfig enforces the documented coupling between attributes_wo and
-// attributes_wo_version. Write-only values are only written to the LDAP server
-// when attributes_wo_version changes, so a non-empty attributes_wo without a
-// version would be silently ignored after creation, and a version without any
-// attributes_wo values has nothing to send. Both configurations are rejected.
-func (r *LdapEntryResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	// Write-only attribute values are only delivered to the provider by clients
-	// that support them (Terraform 1.11+). Terraform already reports the
-	// unsupported-client case as its own error, so there is nothing useful for
-	// us to validate here.
-	if !req.ClientCapabilities.WriteOnlyAttributesAllowed {
-		return
-	}
-
-	var config LdapEntryResourceModel
-
-	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Skip validation when either side is unknown, e.g. pending interpolation or
-	// references to resources whose values are not yet known.
-	woSet := !config.AttributesWO.IsNull() && !config.AttributesWO.IsUnknown() && len(config.AttributesWO.Elements()) > 0
-	versionSet := !config.AttributesWOVer.IsNull() && !config.AttributesWOVer.IsUnknown()
-
-	if woSet && !versionSet {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("attributes_wo"),
-			"Missing attributes_wo_version",
-			"`attributes_wo` requires `attributes_wo_version` to be set. Write-only values are only "+
-				"written to the LDAP server when `attributes_wo_version` changes, so without it the values "+
-				"would be silently ignored after creation.",
-		)
-	}
-
-	if versionSet && !woSet {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("attributes_wo_version"),
-			"Missing attributes_wo",
-			"`attributes_wo_version` requires `attributes_wo` to be set with the values to write.",
-		)
-	}
 }
 
 // Create creates a new LDAP entry with the specified DN and attributes.
