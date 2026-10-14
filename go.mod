@@ -3,7 +3,7 @@ module github.com/ngharo/terraform-provider-ldap
 go 1.26.0
 
 require (
-	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/hashicorp/terraform-json v0.27.2
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
