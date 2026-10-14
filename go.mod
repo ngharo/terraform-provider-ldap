@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/go-ldap/ldap/v3 v3.4.15
-	github.com/hashicorp/terraform-json v0.27.2
+	github.com/hashicorp/terraform-json v0.29.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 	github.com/hashicorp/terraform-plugin-go v0.31.0
